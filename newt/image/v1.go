@@ -31,6 +31,8 @@ import (
 	"mynewt.apache.org/newt/util"
 )
 
+const IMAGEv1_MAGIC = 0x96f3b83c /* Image header magic */
+
 type ImageHdrV1 struct {
 	Magic uint32
 	TlvSz uint16

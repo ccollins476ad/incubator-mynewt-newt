@@ -123,7 +123,6 @@ type ImageCreator struct {
 }
 
 const (
-	IMAGEv1_MAGIC       = 0x96f3b83c /* Image header magic */
 	IMAGE_MAGIC         = 0x96f3b83d /* Image header magic */
 	IMAGE_TRAILER_MAGIC = 0x6907     /* Image tlv info magic */
 )
@@ -1082,7 +1081,7 @@ func (ic *ImageCreator) Create() (ImageRaw, error) {
 		return ri, err
 	}
 	ri.Trailer.TlvTotLen =
-		uint16(totalSize - int(ri.Header.HdrSz) - len(ri.Body) - IMAGE_TRAILER_SIZE)
+		uint16(totalSize - int(ri.Header.HdrSz) - len(ri.Body))
 
 	return ri, nil
 }

@@ -245,18 +245,21 @@ func (tlv *ImageRawTlv) Write(w io.Writer) (int, error) {
 func (i *ImageRaw) Write(w io.Writer) (int, error) {
 	totalSize := 0
 
+	fmt.Printf("HDR: %d\n", totalSize)
 	err := binary.Write(w, binary.LittleEndian, &i.Header)
 	if err != nil {
 		return totalSize, util.ChildNewtError(err)
 	}
 	totalSize += IMAGE_HEADER_SIZE
 
+	fmt.Printf("BODY: %d\n", totalSize)
 	size, err := w.Write(i.Body)
 	if err != nil {
 		return totalSize, util.ChildNewtError(err)
 	}
 	totalSize += size
 
+	fmt.Printf("TRAILER: %d\n", totalSize)
 	err = binary.Write(w, binary.LittleEndian, &i.Trailer)
 	if err != nil {
 		return totalSize, util.ChildNewtError(err)
@@ -264,6 +267,7 @@ func (i *ImageRaw) Write(w io.Writer) (int, error) {
 	totalSize += IMAGE_TRAILER_SIZE
 
 	for _, tlv := range i.Tlvs {
+		fmt.Printf("TLV: %d\n", totalSize)
 		size, err := tlv.Write(w)
 		if err != nil {
 			return totalSize, util.ChildNewtError(err)
@@ -271,6 +275,7 @@ func (i *ImageRaw) Write(w io.Writer) (int, error) {
 		totalSize += size
 	}
 
+	fmt.Printf("TOTAL: %d\n", totalSize)
 	return totalSize, nil
 }
 
