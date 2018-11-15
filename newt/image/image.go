@@ -925,6 +925,19 @@ func NewImageCreator() ImageCreator {
 	}
 }
 
+func ImageCreatorForImageFile(filename string,
+	initialHash []byte) (ImageCreator, error) {
+
+	ic := NewImageCreator()
+
+	srcBin, err := ioutil.ReadFile(image.SourceBin)
+	if err != nil {
+		return ic, util.FmtNewtError("Can't read app binary: %s", err.Error())
+	}
+
+	return ic, nil
+}
+
 func (ic *ImageCreator) addToHash(itf interface{}) error {
 	if err := binary.Write(ic.hash, binary.LittleEndian,
 		itf); err != nil {
