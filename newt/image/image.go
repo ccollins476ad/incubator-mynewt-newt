@@ -1081,7 +1081,8 @@ func (ic *ImageCreator) Create() (ImageRaw, error) {
 	if err != nil {
 		return ri, err
 	}
-	ri.Trailer.TlvTotLen = uint16(totalSize)
+	ri.Trailer.TlvTotLen =
+		uint16(totalSize - int(ri.Header.HdrSz) - len(ri.Body) - IMAGE_TRAILER_SIZE)
 
 	return ri, nil
 }
