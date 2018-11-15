@@ -88,17 +88,17 @@ func runRunCmd(cmd *cobra.Command, args []string) {
 		}
 
 		if len(version) > 0 {
-			var keystrs []string
+			var keys []image.ImageKey
 			var keyId uint8
 
 			if len(args) > 2 {
-				keystrs, keyId, err = parseKeyArgs(args[2:])
+				keys, keyId, err = parseKeyArgs(args[2:])
 				if err != nil {
 					NewtUsage(cmd, err)
 				}
 			}
 
-			_, _, err = b.CreateImages(version, keystrs, keyId)
+			_, _, err = b.CreateImages(version, keys, keyId)
 			if err != nil {
 				NewtUsage(cmd, err)
 			}

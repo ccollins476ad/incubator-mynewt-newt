@@ -794,7 +794,7 @@ func (b *Builder) buildRomElf(common *symbol.SymbolMap) error {
 }
 
 func (b *Builder) CreateImage(version string,
-	keystrs []string, keyId uint8,
+	keys []image.ImageKey, keyId uint8,
 	loaderImg *image.Image) (*image.Image, error) {
 
 	img, err := image.NewImage(b.AppBinPath(), b.AppImgPath())
@@ -807,17 +807,13 @@ func (b *Builder) CreateImage(version string,
 		return nil, err
 	}
 
-	if len(keystrs) == 1 {
-		if err := img.SetKeyV1(keystrs[0], keyId); err != nil {
-			return nil, err
-		}
+	if len(keys) == 1 {
+		img.SetKeyV1(keys[0], keyId)
 	} else {
-		if err := img.SetKeys(keystrs); err != nil {
-			return nil, err
-		}
+		img.SetKeys(keys)
 	}
 
-	img.HeaderSize = uint(b.targetBuilder.target.HeaderSize)
+	img.HeaderSize = int(b.targetBuilder.target.HeaderSize)
 	if err := img.Generate(loaderImg); err != nil {
 		return nil, err
 	}

@@ -31,25 +31,37 @@ import (
 
 var useV1 bool
 var useV2 bool
+var retain bool
 
-func parseKeyArgs(args []string) ([]string, uint8, error) {
+// @return                      keys, key ID, error
+func parseKeyArgs(args []string) ([]image.ImageKey, uint8, error) {
 	if len(args) == 0 {
 		return nil, 0, nil
 	}
 
-	if len(args) == 1 {
-		return args, 0, nil
-	}
+	var keyId uint8
+	var keyFilenames []string
 
-	if image.UseV1 {
-		keyId64, err := strconv.ParseUint(args[1], 10, 8)
+	if len(args) == 1 {
+		keyFilenames = append(keyFilenames, args[0])
+	} else if image.UseV1 {
+		keyIdUint, err := strconv.ParseUint(args[1], 10, 8)
 		if err != nil {
 			return nil, 0, util.NewNewtError("Key ID must be between 0-255")
 		}
-		return args[:1], uint8(keyId64), nil
+		keyId = uint8(keyIdUint)
+		keyFilenames = args[:1]
+	} else {
+		keyId = 0
+		keyFilenames = args
 	}
 
-	return args, 0, nil
+	keys, err := image.ReadKeys(keyFilenames)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return keys, keyId, nil
 }
 
 func createImageRunCmd(cmd *cobra.Command, args []string) {
@@ -83,20 +95,35 @@ func createImageRunCmd(cmd *cobra.Command, args []string) {
 		NewtUsage(nil, err)
 	}
 
-	keystrs, keyId, err := parseKeyArgs(args[2:])
+	keys, keyId, err := parseKeyArgs(args[2:])
 	if err != nil {
 		NewtUsage(cmd, err)
 	}
 
-	if _, _, err := b.CreateImages(version, keystrs, keyId); err != nil {
+	if _, _, err := b.CreateImages(version, keys, keyId); err != nil {
 		NewtUsage(nil, err)
 	}
 }
 
-func resignImageRunCmd(cmd *cobra.Command, args []string) {
-	var keyId uint8
-	var keystr string
+func resignImage(imgName string, keys []image.ImageKey, keyId uint8) error {
+	img, err := image.OldImage(imgName)
+	if err != nil {
+		return err
+	}
 
+	if image.UseV1 {
+		img.SetKeyV1(keys[0], keyId)
+	} else {
+		if retain {
+			keys = append(img.Keys, keys...)
+		}
+		img.SetKeys(keys)
+	}
+
+	return img.ReSign()
+}
+
+func resignImageRunCmd(cmd *cobra.Command, args []string) {
 	if len(args) < 1 {
 		NewtUsage(cmd, util.NewNewtError("Must specify image to re-sign."))
 	}
@@ -108,34 +135,19 @@ func resignImageRunCmd(cmd *cobra.Command, args []string) {
 		image.UseV1 = false
 	} else {
 		image.UseV1 = true
+		if retain {
+			NewtUsage(cmd, util.NewNewtError(
+				"The --retain switch is not compatible with v1 images"))
+		}
 	}
 
 	imgName := args[0]
-	img, err := image.OldImage(imgName)
+	keys, keyId, err := parseKeyArgs(args[1:])
 	if err != nil {
-		NewtUsage(nil, err)
-		return
+		NewtUsage(cmd, err)
 	}
 
-	if len(args) > 1 {
-		if len(args) > 2 {
-			keyId64, err := strconv.ParseUint(args[2], 10, 8)
-			if err != nil {
-				NewtUsage(cmd,
-					util.NewNewtError("Key ID must be between 0-255"))
-			}
-			keyId = uint8(keyId64)
-		}
-		keystr = args[1]
-		err = img.SetKeyV1(keystr, keyId)
-		if err != nil {
-			NewtUsage(nil, err)
-			return
-		}
-	}
-
-	err = img.ReSign()
-	if err != nil {
+	if err := resignImage(imgName, keys, keyId); err != nil {
 		NewtUsage(nil, err)
 	}
 }
@@ -223,6 +235,8 @@ func AddImageCommands(cmd *cobra.Command) {
 		"2", "2", false, "Use new image header format")
 	resignImageCmd.PersistentFlags().StringVarP(&image.PubKeyFile,
 		"encrypt", "e", "", "Encrypt image using this public key")
+	resignImageCmd.PersistentFlags().BoolVarP(&retain,
+		"retain", "r", false, "Preserve old signatures; append new ones")
 
 	cmd.AddCommand(resignImageCmd)
 }
