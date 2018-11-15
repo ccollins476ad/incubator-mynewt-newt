@@ -57,7 +57,11 @@ func runShowCmd(cmd *cobra.Command, args []string) {
 		MimgUsage(cmd, err)
 	}
 
-	fmt.Printf("%s\n", image.RawImageDump(img))
+	y, err := img.Yaml()
+	if err != nil {
+		MimgUsage(nil, err)
+	}
+	fmt.Printf("%s\n", y)
 }
 
 func mimgCmd() *cobra.Command {

@@ -30,16 +30,170 @@ import (
 	"mynewt.apache.org/newt/util"
 )
 
-type ImageRawTlv struct {
+type RawImageTlv struct {
 	Header ImageTrailerTlv
 	Data   []byte
 }
 
-type ImageRaw struct {
+type RawImage struct {
 	Header  ImageHdr
 	Body    []byte
 	Trailer ImageTlvInfo
-	Tlvs    []ImageRawTlv
+	Tlvs    []RawImageTlv
+}
+
+type RawImageOffsets struct {
+	Body      int
+	Trailer   int
+	Tlvs      []int
+	TotalSize int
+}
+
+func (h *ImageHdr) Yaml() string {
+	lines := []string{
+		fmt.Sprintf("Header:"),
+		fmt.Sprintf("    Magic: 0x%08x", h.Magic),
+		fmt.Sprintf("    Pad1: 0x%02x", h.Pad1),
+		fmt.Sprintf("    HdrSz: %d", h.HdrSz),
+		fmt.Sprintf("    Pad2: 0x%02x", h.Pad2),
+		fmt.Sprintf("    ImgSz: %d", h.ImgSz),
+		fmt.Sprintf("    Flags: 0x%08x", h.Flags),
+		fmt.Sprintf("    Vers: %s", h.Vers.String()),
+		fmt.Sprintf("    Pad3: 0x%02x", h.Pad3),
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func rawBodyYaml(offset int) string {
+	lines := []string{
+		fmt.Sprintf("body:"),
+		fmt.Sprintf("    offset: %d", offset),
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func (t *ImageTlvInfo) Yaml(offset int) string {
+	lines := []string{
+		fmt.Sprintf("trailer:"),
+		fmt.Sprintf("    Magic: 0x%08x", t.Magic),
+		fmt.Sprintf("    TlvTotLen: %d", t.TlvTotLen),
+		fmt.Sprintf("    offset: %d", offset),
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func (t *RawImageTlv) Yaml(tlvIdx int, offset int) string {
+	lines := []string{
+		fmt.Sprintf("tlv%d:", tlvIdx),
+		fmt.Sprintf("    Type: %d", t.Header.Type),
+		fmt.Sprintf("    typestr: %s", ImageTlvTypeName(t.Header.Type)),
+		fmt.Sprintf("    Pad: 0x%02x", t.Header.Pad),
+		fmt.Sprintf("    Len: %d", t.Header.Len),
+		fmt.Sprintf("    offset: %d", offset),
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func (img *RawImage) Yaml() (string, error) {
+	var sb strings.Builder
+
+	offs, err := img.Offsets()
+	if err != nil {
+		return "", err
+	}
+
+	sb.WriteString(img.Header.Yaml())
+	sb.WriteString("\n\n")
+	sb.WriteString(img.Trailer.Yaml(offs.Trailer))
+	sb.WriteString("\n\n")
+	sb.WriteString(rawBodyYaml(offs.Body))
+	for i, tlv := range img.Tlvs {
+		sb.WriteString("\n\n")
+		sb.WriteString(tlv.Yaml(i, offs.Tlvs[i]))
+	}
+
+	return sb.String(), nil
+}
+
+func (tlv *RawImageTlv) Write(w io.Writer) (int, error) {
+	totalSize := 0
+
+	err := binary.Write(w, binary.LittleEndian, &tlv.Header)
+	if err != nil {
+		return totalSize, util.ChildNewtError(err)
+	}
+	totalSize += IMAGE_TLV_SIZE
+
+	size, err := w.Write(tlv.Data)
+	if err != nil {
+		return totalSize, util.ChildNewtError(err)
+	}
+	totalSize += size
+
+	return totalSize, nil
+}
+
+func (i *RawImage) WritePlusOffsets(w io.Writer) (RawImageOffsets, error) {
+	offs := RawImageOffsets{}
+	offset := 0
+
+	err := binary.Write(w, binary.LittleEndian, &i.Header)
+	if err != nil {
+		return offs, util.ChildNewtError(err)
+	}
+	offset += IMAGE_HEADER_SIZE
+
+	offs.Body = offset
+	size, err := w.Write(i.Body)
+	if err != nil {
+		return offs, util.ChildNewtError(err)
+	}
+	offset += size
+
+	offs.Trailer = offset
+	err = binary.Write(w, binary.LittleEndian, &i.Trailer)
+	if err != nil {
+		return offs, util.ChildNewtError(err)
+	}
+	offset += IMAGE_TRAILER_SIZE
+
+	for _, tlv := range i.Tlvs {
+		offs.Tlvs = append(offs.Tlvs, offset)
+		size, err := tlv.Write(w)
+		if err != nil {
+			return offs, util.ChildNewtError(err)
+		}
+		offset += size
+	}
+
+	offs.TotalSize = offset
+
+	return offs, nil
+}
+
+func (i *RawImage) Offsets() (RawImageOffsets, error) {
+	return i.WritePlusOffsets(ioutil.Discard)
+}
+
+func (i *RawImage) Write(w io.Writer) (int, error) {
+	offs, err := i.WritePlusOffsets(w)
+	if err != nil {
+		return 0, err
+	}
+
+	return offs.TotalSize, nil
+}
+
+func (i *RawImage) TotalSize() (int, error) {
+	offs, err := i.Offsets()
+	if err != nil {
+		return 0, err
+	}
+	return offs.TotalSize, nil
 }
 
 func parseRawHeader(imgData []byte, offset int) (ImageHdr, int, error) {
@@ -99,8 +253,8 @@ func parseRawTrailer(imgData []byte, offset int) (ImageTlvInfo, int, error) {
 	return trailer, IMAGE_TRAILER_SIZE, nil
 }
 
-func parseRawTlv(imgData []byte, offset int) (ImageRawTlv, int, error) {
-	tlv := ImageRawTlv{}
+func parseRawTlv(imgData []byte, offset int) (RawImageTlv, int, error) {
+	tlv := RawImageTlv{}
 
 	r := bytes.NewReader(imgData)
 	r.Seek(int64(offset), io.SeekStart)
@@ -120,8 +274,8 @@ func parseRawTlv(imgData []byte, offset int) (ImageRawTlv, int, error) {
 	return tlv, IMAGE_TLV_SIZE + int(tlv.Header.Len), nil
 }
 
-func ParseRawImage(imgData []byte) (ImageRaw, error) {
-	img := ImageRaw{}
+func ParseRawImage(imgData []byte) (RawImage, error) {
+	img := RawImage{}
 	offset := 0
 
 	hdr, size, err := parseRawHeader(imgData, offset)
@@ -142,7 +296,7 @@ func ParseRawImage(imgData []byte) (ImageRaw, error) {
 	}
 	offset += size
 
-	var tlvs []ImageRawTlv
+	var tlvs []RawImageTlv
 	for offset < len(imgData) {
 		tlv, size, err := parseRawTlv(imgData, offset)
 		if err != nil {
@@ -161,8 +315,8 @@ func ParseRawImage(imgData []byte) (ImageRaw, error) {
 	return img, nil
 }
 
-func ReadRawImage(filename string) (ImageRaw, error) {
-	ri := ImageRaw{}
+func ReadRawImage(filename string) (RawImage, error) {
+	ri := RawImage{}
 
 	imgData, err := ioutil.ReadFile(filename)
 	if err != nil {
@@ -170,119 +324,4 @@ func ReadRawImage(filename string) (ImageRaw, error) {
 	}
 
 	return ParseRawImage(imgData)
-}
-
-func rawHeaderDump(hdr ImageHdr) string {
-	lines := []string{
-		fmt.Sprintf("Header:"),
-		fmt.Sprintf("    Magic: 0x%08x", hdr.Magic),
-		fmt.Sprintf("    Pad1: 0x%02x", hdr.Pad1),
-		fmt.Sprintf("    HdrSz: %d", hdr.HdrSz),
-		fmt.Sprintf("    Pad2: 0x%02x", hdr.Pad2),
-		fmt.Sprintf("    ImgSz: %d", hdr.ImgSz),
-		fmt.Sprintf("    Flags: 0x%08x", hdr.Flags),
-		fmt.Sprintf("    Vers: %s", hdr.Vers.String()),
-		fmt.Sprintf("    Pad3: 0x%02x", hdr.Pad3),
-	}
-
-	return strings.Join(lines, "\n")
-}
-
-func rawTrailerDump(trailer ImageTlvInfo) string {
-	lines := []string{
-		fmt.Sprintf("trailer:"),
-		fmt.Sprintf("    Magic: 0x%08x", trailer.Magic),
-		fmt.Sprintf("    TotLen: %d", trailer.TlvTotLen),
-	}
-
-	return strings.Join(lines, "\n")
-}
-
-func rawTlvDump(tlv ImageRawTlv, tlvIdx int) string {
-	lines := []string{
-		fmt.Sprintf("tlv%d:", tlvIdx),
-		fmt.Sprintf("    Type: %d (%s)",
-			tlv.Header.Type, ImageTlvTypeName(tlv.Header.Type)),
-		fmt.Sprintf("    Pad: 0x%02x", tlv.Header.Pad),
-		fmt.Sprintf("    Len: %d", tlv.Header.Len),
-	}
-
-	return strings.Join(lines, "\n")
-}
-
-func RawImageDump(img ImageRaw) string {
-	var sb strings.Builder
-
-	sb.WriteString(rawHeaderDump(img.Header))
-	sb.WriteString("\n\n")
-	sb.WriteString(rawTrailerDump(img.Trailer))
-	for i, tlv := range img.Tlvs {
-		sb.WriteString("\n\n")
-		sb.WriteString(rawTlvDump(tlv, i))
-	}
-
-	return sb.String()
-}
-
-func (tlv *ImageRawTlv) Write(w io.Writer) (int, error) {
-	totalSize := 0
-
-	err := binary.Write(w, binary.LittleEndian, &tlv.Header)
-	if err != nil {
-		return totalSize, util.ChildNewtError(err)
-	}
-	totalSize += IMAGE_TLV_SIZE
-
-	size, err := w.Write(tlv.Data)
-	if err != nil {
-		return totalSize, util.ChildNewtError(err)
-	}
-	totalSize += size
-
-	return totalSize, nil
-}
-
-func (i *ImageRaw) Write(w io.Writer) (int, error) {
-	totalSize := 0
-
-	fmt.Printf("HDR: %d\n", totalSize)
-	err := binary.Write(w, binary.LittleEndian, &i.Header)
-	if err != nil {
-		return totalSize, util.ChildNewtError(err)
-	}
-	totalSize += IMAGE_HEADER_SIZE
-
-	fmt.Printf("BODY: %d\n", totalSize)
-	size, err := w.Write(i.Body)
-	if err != nil {
-		return totalSize, util.ChildNewtError(err)
-	}
-	totalSize += size
-
-	fmt.Printf("TRAILER: %d\n", totalSize)
-	err = binary.Write(w, binary.LittleEndian, &i.Trailer)
-	if err != nil {
-		return totalSize, util.ChildNewtError(err)
-	}
-	totalSize += IMAGE_TRAILER_SIZE
-
-	for _, tlv := range i.Tlvs {
-		fmt.Printf("TLV: %d\n", totalSize)
-		size, err := tlv.Write(w)
-		if err != nil {
-			return totalSize, util.ChildNewtError(err)
-		}
-		totalSize += size
-	}
-
-	fmt.Printf("TOTAL: %d\n", totalSize)
-	return totalSize, nil
-}
-
-func (i *ImageRaw) TotalSize() (int, error) {
-	size, err := i.Write(ioutil.Discard)
-	if err != nil {
-		return 0, util.ChildNewtError(err)
-	}
-	return size, nil
 }

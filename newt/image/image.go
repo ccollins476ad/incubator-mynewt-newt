@@ -602,7 +602,7 @@ func (image *Image) ReSign() error {
 	return image.Generate(nil)
 }
 
-func generateEncTlv(cipherSecret []byte) (ImageRawTlv, error) {
+func generateEncTlv(cipherSecret []byte) (RawImageTlv, error) {
 	var encType uint8
 
 	if len(cipherSecret) == 256 {
@@ -610,10 +610,10 @@ func generateEncTlv(cipherSecret []byte) (ImageRawTlv, error) {
 	} else if len(cipherSecret) == 24 {
 		encType = IMAGE_TLV_ENC_KEK
 	} else {
-		return ImageRawTlv{}, util.FmtNewtError("Invalid enc TLV size ")
+		return RawImageTlv{}, util.FmtNewtError("Invalid enc TLV size ")
 	}
 
-	return ImageRawTlv{
+	return RawImageTlv{
 		Header: ImageTrailerTlv{
 			Type: encType,
 			Pad:  0,
@@ -663,13 +663,13 @@ func generateSigEc(key *ecdsa.PrivateKey, hash []byte) ([]byte, error) {
 	return signature, nil
 }
 
-func generateSigTlvRsa(key ImageKey, hash []byte) (ImageRawTlv, error) {
+func generateSigTlvRsa(key ImageKey, hash []byte) (RawImageTlv, error) {
 	sig, err := generateSigRsa(key.Rsa, hash)
 	if err != nil {
-		return ImageRawTlv{}, err
+		return RawImageTlv{}, err
 	}
 
-	return ImageRawTlv{
+	return RawImageTlv{
 		Header: ImageTrailerTlv{
 			Type: key.sigTlvType(),
 			Pad:  0,
@@ -679,31 +679,31 @@ func generateSigTlvRsa(key ImageKey, hash []byte) (ImageRawTlv, error) {
 	}, nil
 }
 
-func generateSigTlvEc(key ImageKey, hash []byte) (ImageRawTlv, error) {
+func generateSigTlvEc(key ImageKey, hash []byte) (RawImageTlv, error) {
 	sig, err := generateSigEc(key.Ec, hash)
 	if err != nil {
-		return ImageRawTlv{}, err
+		return RawImageTlv{}, err
 	}
 
 	sigLen := key.sigLen()
 	if len(sig) > int(sigLen) {
-		return ImageRawTlv{}, util.FmtNewtError("Something is really wrong\n")
+		return RawImageTlv{}, util.FmtNewtError("Something is really wrong\n")
 	}
 
 	b := &bytes.Buffer{}
 
 	if _, err := b.Write(sig); err != nil {
-		return ImageRawTlv{},
+		return RawImageTlv{},
 			util.FmtNewtError("Failed to append sig: %s", err.Error())
 	}
 
 	pad := make([]byte, int(sigLen)-len(sig))
 	if _, err := b.Write(pad); err != nil {
-		return ImageRawTlv{}, util.FmtNewtError(
+		return RawImageTlv{}, util.FmtNewtError(
 			"Failed to serialize image trailer: %s", err.Error())
 	}
 
-	return ImageRawTlv{
+	return RawImageTlv{
 		Header: ImageTrailerTlv{
 			Type: key.sigTlvType(),
 			Pad:  0,
@@ -713,7 +713,7 @@ func generateSigTlvEc(key ImageKey, hash []byte) (ImageRawTlv, error) {
 	}, nil
 }
 
-func generateSigTlv(key ImageKey, hash []byte) (ImageRawTlv, error) {
+func generateSigTlv(key ImageKey, hash []byte) (RawImageTlv, error) {
 	key.assertValid()
 
 	if key.Rsa != nil {
@@ -723,16 +723,16 @@ func generateSigTlv(key ImageKey, hash []byte) (ImageRawTlv, error) {
 	}
 }
 
-func generateKeyHashTlv(key ImageKey) (ImageRawTlv, error) {
+func generateKeyHashTlv(key ImageKey) (RawImageTlv, error) {
 	key.assertValid()
 
 	keyHash, err := key.sigKeyHash()
 	if err != nil {
-		return ImageRawTlv{}, util.FmtNewtError(
+		return RawImageTlv{}, util.FmtNewtError(
 			"Failed to compute hash of the public key: %s", err.Error())
 	}
 
-	return ImageRawTlv{
+	return RawImageTlv{
 		Header: ImageTrailerTlv{
 			Type: IMAGE_TLV_KEYHASH,
 			Pad:  0,
@@ -742,8 +742,8 @@ func generateKeyHashTlv(key ImageKey) (ImageRawTlv, error) {
 	}, nil
 }
 
-func GenerateSigTlvs(keys []ImageKey, hash []byte) ([]ImageRawTlv, error) {
-	var tlvs []ImageRawTlv
+func GenerateSigTlvs(keys []ImageKey, hash []byte) ([]RawImageTlv, error) {
+	var tlvs []RawImageTlv
 
 	for _, key := range keys {
 		key.assertValid()
@@ -935,8 +935,8 @@ func (ic *ImageCreator) addToHash(itf interface{}) error {
 	return nil
 }
 
-func (ic *ImageCreator) Create() (ImageRaw, error) {
-	ri := ImageRaw{}
+func (ic *ImageCreator) Create() (RawImage, error) {
+	ri := RawImage{}
 
 	if ic.InitialHash != nil {
 		if err := ic.addToHash(ic.InitialHash); err != nil {
@@ -1052,7 +1052,7 @@ func (ic *ImageCreator) Create() (ImageRaw, error) {
 	}
 
 	// Hash TLV.
-	tlv := ImageRawTlv{
+	tlv := RawImageTlv{
 		Header: ImageTrailerTlv{
 			Type: IMAGE_TLV_SHA256,
 			Pad:  0,
