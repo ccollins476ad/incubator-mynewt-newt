@@ -137,6 +137,30 @@ func (tlv *RawImageTlv) Write(w io.Writer) (int, error) {
 	return totalSize, nil
 }
 
+func (i *RawImage) FindTlvs(tlvType uint8) []RawImageTlv {
+	var tlvs []RawImageTlv
+
+	for _, tlv := range i.Tlvs {
+		if tlv.Header.Type == tlvType {
+			tlvs = append(tlvs, tlv)
+		}
+	}
+
+	return tlvs
+}
+
+func (i *RawImage) Hash() ([]byte, error) {
+	tlvs := i.FindTlvs(IMAGE_TLV_KEYHASH)
+	if len(tlvs) == 0 {
+		return nil, util.FmtNewtError("Image does not contain hash TLV")
+	}
+	if len(tlvs) > 1 {
+		return nil, util.FmtNewtError("Image contains %d hash TLVs", len(tlvs))
+	}
+
+	return tlvs[0].Data, nil
+}
+
 func (i *RawImage) WritePlusOffsets(w io.Writer) (RawImageOffsets, error) {
 	offs := RawImageOffsets{}
 	offset := 0

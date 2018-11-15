@@ -82,7 +82,6 @@ type Image struct {
 	Keys       []ImageKey
 	KeyId      uint8
 	Hash       []byte
-	SrcSkip    int // Number of bytes to skip from the source image.
 	HeaderSize int // If non-zero pad out the header to this size.
 	TotalSize  int // Total size, in bytes, of the generated .img file.
 }
@@ -120,6 +119,23 @@ type ImageCreator struct {
 	Bootable     bool
 
 	hash hash.Hash
+}
+
+type ImageGenerateOpts struct {
+	SrcBinFilename    string
+	SrcEncKeyFilename string
+	Version           ImageVersion
+	SigKeys           []ImageKey
+	LoaderHash        []byte
+}
+
+type ImageWriteOpts struct {
+	LoaderSrcFilename string
+	LoaderDstFilename string
+	AppSrcFilename    string
+	AppDstFilename    string
+	Version           ImageVersion
+	SigKeys           []ImageKey
 }
 
 const (
@@ -764,57 +780,36 @@ func GenerateSigTlvs(keys []ImageKey, hash []byte) ([]RawImageTlv, error) {
 	return tlvs, nil
 }
 
-func (image *Image) generateV2(loader *Image) error {
+func GenerateImage(opts ImageGenerateOpts) (RawImage, error) {
 	ic := NewImageCreator()
 
-	srcBin, err := ioutil.ReadFile(image.SourceBin)
+	srcBin, err := ioutil.ReadFile(opts.SrcBinFilename)
 	if err != nil {
-		return util.FmtNewtError("Can't read app binary: %s", err.Error())
+		return RawImage{}, util.FmtNewtError(
+			"Can't read app binary: %s", err.Error())
 	}
 
-	if image.SrcSkip > len(srcBin) {
-		return util.FmtNewtError(
-			"request to skip %d bytes of %d byte file (%s)",
-			image.SrcSkip, len(srcBin), image.SourceBin)
-	}
+	ic.Body = srcBin
+	ic.Version = opts.Version
+	ic.SigKeys = opts.SigKeys
 
-	for i := 0; i < image.SrcSkip; i++ {
-		if srcBin[i] != 0 {
-			log.Warnf(
-				"Skip requested of image %s; nonzero byte found at offset %d",
-				image.SourceBin, image.SrcSkip)
-		}
-	}
-
-	imgFile, err := os.OpenFile(image.TargetImg,
-		os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0666)
-	if err != nil {
-		return util.FmtNewtError("Can't open target image %s: %s",
-			image.TargetImg, err.Error())
-	}
-	defer imgFile.Close()
-
-	ic.Body = srcBin[image.SrcSkip:]
-	ic.Version = image.Version
-	ic.SigKeys = image.Keys
-
-	if loader != nil {
-		ic.InitialHash = loader.Hash
+	if opts.LoaderHash != nil {
+		ic.InitialHash = opts.LoaderHash
 		ic.Bootable = false
 	} else {
 		ic.Bootable = true
 	}
-	ic.HeaderSize = image.HeaderSize
 
-	if PubKeyFile != "" {
+	if opts.SrcEncKeyFilename != "" {
 		plainSecret := make([]byte, 16)
 		if _, err := rand.Read(plainSecret); err != nil {
-			return util.FmtNewtError("Random generation error: %s\n", err)
+			return RawImage{}, util.FmtNewtError(
+				"Random generation error: %s\n", err)
 		}
 
-		cipherSecret, err := ReadEncKey(PubKeyFile, plainSecret)
+		cipherSecret, err := ReadEncKey(opts.SrcEncKeyFilename, plainSecret)
 		if err != nil {
-			return err
+			return RawImage{}, err
 		}
 
 		ic.PlainSecret = plainSecret
@@ -823,10 +818,106 @@ func (image *Image) generateV2(loader *Image) error {
 
 	ri, err := ic.Create()
 	if err != nil {
+		return RawImage{}, err
+	}
+
+	return ri, nil
+}
+
+func writeLoader(opts ImageWriteOpts) ([]byte, error) {
+	igo := ImageGenerateOpts{
+		SrcBinFilename:    opts.LoaderSrcFilename,
+		SrcEncKeyFilename: PubKeyFile,
+		Version:           opts.Version,
+		SigKeys:           opts.SigKeys,
+	}
+
+	ri, err := GenerateImage(igo)
+	if err != nil {
+		return nil, err
+	}
+
+	hash, err := ri.Hash()
+	if err != nil {
+		return nil, err
+	}
+
+	imgFile, err := os.OpenFile(opts.LoaderDstFilename,
+		os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0666)
+	if err != nil {
+		return nil, util.FmtNewtError(
+			"Can't open target image %s: %s",
+			opts.LoaderDstFilename, err.Error())
+	}
+	defer imgFile.Close()
+
+	if _, err := ri.Write(imgFile); err != nil {
+		return nil, err
+	}
+
+	return hash, nil
+}
+
+func writeApp(opts ImageWriteOpts, loaderHash []byte) error {
+	igo := ImageGenerateOpts{
+		SrcBinFilename:    opts.AppSrcFilename,
+		SrcEncKeyFilename: PubKeyFile,
+		Version:           opts.Version,
+		SigKeys:           opts.SigKeys,
+		LoaderHash:        loaderHash,
+	}
+
+	ri, err := GenerateImage(igo)
+	if err != nil {
 		return err
 	}
 
+	imgFile, err := os.OpenFile(opts.AppDstFilename,
+		os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0666)
+	if err != nil {
+		return util.FmtNewtError(
+			"Can't open target image %s: %s", opts.AppDstFilename, err.Error())
+	}
+	defer imgFile.Close()
+
 	if _, err := ri.Write(imgFile); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func WriteImages(opts ImageWriteOpts) error {
+	var loaderHash []byte
+
+	if opts.LoaderSrcFilename != "" {
+		var err error
+		loaderHash, err = writeLoader(opts)
+		if err != nil {
+			return err
+		}
+	}
+
+	if err := writeApp(opts, loaderHash); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (image *Image) generateV2(loader *Image) error {
+	opts := ImageGenerateOpts{
+		SrcBinFilename:    image.SourceBin,
+		SrcEncKeyFilename: PubKeyFile,
+		Version:           image.Version,
+		SigKeys:           image.Keys,
+	}
+
+	if loader != nil {
+		opts.LoaderHash = loader.Hash
+	}
+
+	if _, err := GenerateImage(opts); err != nil {
 		return err
 	}
 
@@ -921,21 +1012,10 @@ func ReadEncKey(filename string, plainSecret []byte) ([]byte, error) {
 
 func NewImageCreator() ImageCreator {
 	return ImageCreator{
-		hash: sha256.New(),
+		HeaderSize: IMAGE_HEADER_SIZE,
+		Bootable:   true,
+		hash:       sha256.New(),
 	}
-}
-
-func ImageCreatorForImageFile(filename string,
-	initialHash []byte) (ImageCreator, error) {
-
-	ic := NewImageCreator()
-
-	srcBin, err := ioutil.ReadFile(image.SourceBin)
-	if err != nil {
-		return ic, util.FmtNewtError("Can't read app binary: %s", err.Error())
-	}
-
-	return ic, nil
 }
 
 func (ic *ImageCreator) addToHash(itf interface{}) error {

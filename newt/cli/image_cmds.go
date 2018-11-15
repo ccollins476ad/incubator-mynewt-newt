@@ -65,8 +65,6 @@ func parseKeyArgs(args []string) ([]image.ImageKey, uint8, error) {
 }
 
 func createImageRunCmd(cmd *cobra.Command, args []string) {
-	var keyId uint8
-
 	if len(args) < 2 {
 		NewtUsage(cmd, util.NewNewtError("Must specify target and version"))
 	}
@@ -88,19 +86,34 @@ func createImageRunCmd(cmd *cobra.Command, args []string) {
 		NewtUsage(cmd, util.NewNewtError("Invalid target name: "+targetName))
 	}
 
-	version := args[1]
+	ver, err := image.ParseVersion(args[1])
+	if err != nil {
+		NewtUsage(cmd, err)
+	}
 
 	b, err := builder.NewTargetBuilder(t)
 	if err != nil {
 		NewtUsage(nil, err)
 	}
 
-	keys, keyId, err := parseKeyArgs(args[2:])
+	keys, _, err := parseKeyArgs(args[2:])
 	if err != nil {
 		NewtUsage(cmd, err)
 	}
 
-	if _, _, err := b.CreateImages(version, keys, keyId); err != nil {
+	opts := image.ImageWriteOpts{
+		AppSrcFilename: b.AppBuilder.AppBinPath(),
+		AppDstFilename: b.AppBuilder.AppImgPath(),
+		Version:        ver,
+		SigKeys:        keys,
+	}
+
+	if b.LoaderBuilder != nil {
+		opts.LoaderSrcFilename = b.LoaderBuilder.AppBinPath()
+		opts.LoaderDstFilename = b.LoaderBuilder.AppImgPath()
+	}
+
+	if err := image.WriteImages(opts); err != nil {
 		NewtUsage(nil, err)
 	}
 }
