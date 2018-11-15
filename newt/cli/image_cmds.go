@@ -101,6 +101,10 @@ func createImageRunCmd(cmd *cobra.Command, args []string) {
 		NewtUsage(cmd, err)
 	}
 
+	if err := b.Build(); err != nil {
+		NewtUsage(nil, err)
+	}
+
 	opts := image.ImageWriteOpts{
 		AppSrcFilename: b.AppBuilder.AppBinPath(),
 		AppDstFilename: b.AppBuilder.AppImgPath(),
