@@ -22,11 +22,10 @@ package image
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
+	"encoding/json"
 	"io"
 	"io/ioutil"
 	"os"
-	"strings"
 
 	"mynewt.apache.org/newt/util"
 )
@@ -50,74 +49,71 @@ type RawImageOffsets struct {
 	TotalSize int
 }
 
-func (h *ImageHdr) Yaml() string {
-	lines := []string{
-		fmt.Sprintf("header:"),
-		fmt.Sprintf("    Magic: 0x%08x", h.Magic),
-		fmt.Sprintf("    Pad1: 0x%02x", h.Pad1),
-		fmt.Sprintf("    HdrSz: %d", h.HdrSz),
-		fmt.Sprintf("    Pad2: 0x%02x", h.Pad2),
-		fmt.Sprintf("    ImgSz: %d", h.ImgSz),
-		fmt.Sprintf("    Flags: 0x%08x", h.Flags),
-		fmt.Sprintf("    Vers: %s", h.Vers.String()),
-		fmt.Sprintf("    Pad3: 0x%02x", h.Pad3),
+func (h *ImageHdr) Map() map[string]interface{} {
+	return map[string]interface{}{
+		"Magic": h.Magic,
+		"HdrSz": h.HdrSz,
+		"ImgSz": h.ImgSz,
+		"Flags": h.Flags,
+		"Vers":  h.Vers.String(),
 	}
-
-	return strings.Join(lines, "\n")
 }
 
-func rawBodyYaml(offset int) string {
-	lines := []string{
-		fmt.Sprintf("body:"),
-		fmt.Sprintf("    offset: %d", offset),
+func rawBodyMap(offset int) map[string]interface{} {
+	return map[string]interface{}{
+		"offset": offset,
 	}
-
-	return strings.Join(lines, "\n")
 }
 
-func (t *ImageTlvInfo) Yaml(offset int) string {
-	lines := []string{
-		fmt.Sprintf("trailer:"),
-		fmt.Sprintf("    Magic: 0x%08x", t.Magic),
-		fmt.Sprintf("    TlvTotLen: %d", t.TlvTotLen),
-		fmt.Sprintf("    offset: %d", offset),
+func (t *ImageTlvInfo) Map(offset int) map[string]interface{} {
+	return map[string]interface{}{
+		"Magic":     t.Magic,
+		"TlvTotLen": t.TlvTotLen,
+		"offset":    offset,
 	}
-
-	return strings.Join(lines, "\n")
 }
 
-func (t *RawImageTlv) Yaml(tlvIdx int, offset int) string {
-	lines := []string{
-		fmt.Sprintf("tlv%d:", tlvIdx),
-		fmt.Sprintf("    Type: %d", t.Header.Type),
-		fmt.Sprintf("    typestr: %s", ImageTlvTypeName(t.Header.Type)),
-		fmt.Sprintf("    Pad: 0x%02x", t.Header.Pad),
-		fmt.Sprintf("    Len: %d", t.Header.Len),
-		fmt.Sprintf("    offset: %d", offset),
+func (t *RawImageTlv) Map(offset int) map[string]interface{} {
+	return map[string]interface{}{
+		"Type":    t.Header.Type,
+		"typestr": ImageTlvTypeName(t.Header.Type),
+		"Len":     t.Header.Len,
+		"offset":  offset,
 	}
-
-	return strings.Join(lines, "\n")
 }
 
-func (img *RawImage) Yaml() (string, error) {
-	var sb strings.Builder
-
+func (img *RawImage) Map() (map[string]interface{}, error) {
 	offs, err := img.Offsets()
+	if err != nil {
+		return nil, err
+	}
+
+	m := map[string]interface{}{}
+	m["header"] = img.Header.Map()
+	m["body"] = rawBodyMap(offs.Body)
+	m["trailer"] = img.Trailer.Map(offs.Trailer)
+
+	tlvMaps := []map[string]interface{}{}
+	for i, tlv := range img.Tlvs {
+		tlvMaps = append(tlvMaps, tlv.Map(offs.Tlvs[i]))
+	}
+	m["tlvs"] = tlvMaps
+
+	return m, nil
+}
+
+func (img *RawImage) Json() (string, error) {
+	m, err := img.Map()
 	if err != nil {
 		return "", err
 	}
 
-	sb.WriteString(img.Header.Yaml())
-	sb.WriteString("\n\n")
-	sb.WriteString(rawBodyYaml(offs.Body))
-	sb.WriteString("\n\n")
-	sb.WriteString(img.Trailer.Yaml(offs.Trailer))
-	for i, tlv := range img.Tlvs {
-		sb.WriteString("\n\n")
-		sb.WriteString(tlv.Yaml(i, offs.Tlvs[i]))
+	b, err := json.MarshalIndent(m, "", "    ")
+	if err != nil {
+		return "", util.ChildNewtError(err)
 	}
 
-	return sb.String(), nil
+	return string(b), nil
 }
 
 func (tlv *RawImageTlv) Write(w io.Writer) (int, error) {
@@ -148,6 +144,21 @@ func (i *RawImage) FindTlvs(tlvType uint8) []RawImageTlv {
 	}
 
 	return tlvs
+}
+
+func (i *RawImage) RemoveTlvsIf(pred func(tlv RawImageTlv) bool) int {
+	numRmed := 0
+	for idx := 0; idx < len(i.Tlvs); {
+		tlv := i.Tlvs[idx]
+		if pred(tlv) {
+			i.Tlvs = append(i.Tlvs[:idx], i.Tlvs[idx+1:]...)
+			numRmed++
+		} else {
+			idx++
+		}
+	}
+
+	return numRmed
 }
 
 func (i *RawImage) Hash() ([]byte, error) {

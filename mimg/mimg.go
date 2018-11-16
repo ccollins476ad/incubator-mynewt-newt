@@ -31,6 +31,9 @@ import (
 )
 
 var mimgVersion = "0.0.1"
+var optReplaceSigs bool
+var optOutFilename string
+var optInPlace bool
 
 func MimgUsage(cmd *cobra.Command, err error) {
 	if err != nil {
@@ -57,11 +60,72 @@ func runShowCmd(cmd *cobra.Command, args []string) {
 		MimgUsage(cmd, err)
 	}
 
-	y, err := img.Yaml()
+	s, err := img.Json()
 	if err != nil {
 		MimgUsage(nil, err)
 	}
-	fmt.Printf("%s\n", y)
+	fmt.Printf("%s\n", s)
+}
+
+func runSignCmd(cmd *cobra.Command, args []string) {
+	if len(args) < 2 {
+		MimgUsage(cmd, nil)
+	}
+
+	inFilename := args[0]
+
+	var outFilename string
+	if optOutFilename != "" {
+		if optInPlace {
+			MimgUsage(cmd, util.FmtNewtError(
+				"Only one of --outfile (-o) or --inplace (-i) options allowed"))
+		}
+
+		outFilename = optOutFilename
+	} else if optInPlace {
+		outFilename = inFilename
+	} else {
+		MimgUsage(cmd, util.FmtNewtError(
+			"--outfile (-o) or --inplace (-i) option required"))
+	}
+
+	img, err := image.ReadRawImage(inFilename)
+	if err != nil {
+		MimgUsage(cmd, err)
+	}
+
+	keys, err := image.ReadKeys(args[1:])
+	if err != nil {
+		MimgUsage(cmd, err)
+	}
+
+	hash, err := img.Hash()
+	if err != nil {
+		MimgUsage(cmd, util.FmtNewtError(
+			"Failed to read hash from specified image: %s", err.Error()))
+	}
+
+	tlvs, err := image.GenerateSigTlvs(keys, hash)
+	if err != nil {
+		MimgUsage(nil, err)
+	}
+
+	if optReplaceSigs {
+		cnt := img.RemoveTlvsIf(func(tlv image.RawImageTlv) bool {
+			return tlv.Header.Type == image.IMAGE_TLV_KEYHASH ||
+				tlv.Header.Type == image.IMAGE_TLV_RSA2048 ||
+				tlv.Header.Type == image.IMAGE_TLV_ECDSA224 ||
+				tlv.Header.Type == image.IMAGE_TLV_ECDSA256
+		})
+
+		log.Debugf("Removed %d existing signatures", cnt)
+	}
+
+	img.Tlvs = append(img.Tlvs, tlvs...)
+
+	if err := img.WriteToFile(outFilename); err != nil {
+		MimgUsage(nil, err)
+	}
 }
 
 func mimgCmd() *cobra.Command {
@@ -102,6 +166,26 @@ func mimgCmd() *cobra.Command {
 		},
 	}
 	mimgCmd.AddCommand(showCmd)
+
+	signHelpText := ""
+	signHelpEx := ""
+	signCmd := &cobra.Command{
+		Use:     "sign",
+		Long:    signHelpText,
+		Example: signHelpEx,
+		Run: func(cmd *cobra.Command, args []string) {
+			runSignCmd(cmd, args)
+		},
+	}
+
+	signCmd.PersistentFlags().BoolVarP(&optReplaceSigs, "replace", "r", false,
+		"Replace existing signatures rather than appending")
+	signCmd.PersistentFlags().StringVarP(&optOutFilename, "outfile", "o", "",
+		"File to write to")
+	signCmd.PersistentFlags().BoolVarP(&optInPlace, "inplace", "i", false,
+		"Replace input file")
+
+	mimgCmd.AddCommand(signCmd)
 
 	return mimgCmd
 }
