@@ -113,24 +113,30 @@ func createImageRunCmd(cmd *cobra.Command, args []string) {
 	}
 }
 
-func resignImage(imgName string, keys []image.ImageKey, keyId uint8) error {
-	/*
-		img, err := image.OldImage(imgName)
-		if err != nil {
-			return err
-		}
+func resignImage(imgPath string, keys []image.ImageKey, keyId uint8) error {
+	img, err := image.ReadRawImage(imgPath)
+	if err != nil {
+		return err
+	}
 
-		if image.UseV1 {
-			img.SetKeyV1(keys[0], keyId)
-		} else {
-			if retain {
-				keys = append(img.Keys, keys...)
-			}
-			img.SetKeys(keys)
-		}
+	hash, err := img.Hash()
+	if err != nil {
+		return util.FmtNewtError(
+			"Failed to read hash from specified image: %s", err.Error())
+	}
 
-		return img.ReSign()
-	*/
+	tlvs, err := image.GenerateSigTlvs(keys, hash)
+	if err != nil {
+		return err
+	}
+
+	// XXX: Assumes retain.
+	img.Tlvs = append(img.Tlvs, tlvs...)
+
+	if err := img.WriteToFile(imgPath); err != nil {
+		return err
+	}
+
 	return nil
 }
 

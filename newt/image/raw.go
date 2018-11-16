@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"os"
 	"strings"
 
 	"mynewt.apache.org/newt/util"
@@ -51,7 +52,7 @@ type RawImageOffsets struct {
 
 func (h *ImageHdr) Yaml() string {
 	lines := []string{
-		fmt.Sprintf("Header:"),
+		fmt.Sprintf("header:"),
 		fmt.Sprintf("    Magic: 0x%08x", h.Magic),
 		fmt.Sprintf("    Pad1: 0x%02x", h.Pad1),
 		fmt.Sprintf("    HdrSz: %d", h.HdrSz),
@@ -108,9 +109,9 @@ func (img *RawImage) Yaml() (string, error) {
 
 	sb.WriteString(img.Header.Yaml())
 	sb.WriteString("\n\n")
-	sb.WriteString(img.Trailer.Yaml(offs.Trailer))
-	sb.WriteString("\n\n")
 	sb.WriteString(rawBodyYaml(offs.Body))
+	sb.WriteString("\n\n")
+	sb.WriteString(img.Trailer.Yaml(offs.Trailer))
 	for i, tlv := range img.Tlvs {
 		sb.WriteString("\n\n")
 		sb.WriteString(tlv.Yaml(i, offs.Tlvs[i]))
@@ -150,7 +151,7 @@ func (i *RawImage) FindTlvs(tlvType uint8) []RawImageTlv {
 }
 
 func (i *RawImage) Hash() ([]byte, error) {
-	tlvs := i.FindTlvs(IMAGE_TLV_KEYHASH)
+	tlvs := i.FindTlvs(IMAGE_TLV_SHA256)
 	if len(tlvs) == 0 {
 		return nil, util.FmtNewtError("Image does not contain hash TLV")
 	}
@@ -203,6 +204,14 @@ func (i *RawImage) Offsets() (RawImageOffsets, error) {
 	return i.WritePlusOffsets(ioutil.Discard)
 }
 
+func (i *RawImage) TotalSize() (int, error) {
+	offs, err := i.Offsets()
+	if err != nil {
+		return 0, err
+	}
+	return offs.TotalSize, nil
+}
+
 func (i *RawImage) Write(w io.Writer) (int, error) {
 	offs, err := i.WritePlusOffsets(w)
 	if err != nil {
@@ -212,12 +221,17 @@ func (i *RawImage) Write(w io.Writer) (int, error) {
 	return offs.TotalSize, nil
 }
 
-func (i *RawImage) TotalSize() (int, error) {
-	offs, err := i.Offsets()
+func (i *RawImage) WriteToFile(filename string) error {
+	f, err := os.OpenFile(filename, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0666)
 	if err != nil {
-		return 0, err
+		return util.ChildNewtError(err)
 	}
-	return offs.TotalSize, nil
+
+	if _, err := i.Write(f); err != nil {
+		return util.ChildNewtError(err)
+	}
+
+	return nil
 }
 
 func parseRawHeader(imgData []byte, offset int) (ImageHdr, int, error) {
@@ -283,13 +297,12 @@ func parseRawTlv(imgData []byte, offset int) (RawImageTlv, int, error) {
 	r := bytes.NewReader(imgData)
 	r.Seek(int64(offset), io.SeekStart)
 
-	if err := binary.Read(r, binary.LittleEndian,
-		&tlv.Header); err != nil {
-
+	if err := binary.Read(r, binary.LittleEndian, &tlv.Header); err != nil {
 		return tlv, 0, util.FmtNewtError(
 			"Image contains invalid TLV at offset %d: %s", offset, err.Error())
 	}
 
+	tlv.Data = make([]byte, tlv.Header.Len)
 	if _, err := r.Read(tlv.Data); err != nil {
 		return tlv, 0, util.FmtNewtError(
 			"Image contains invalid TLV at offset %d: %s", offset, err.Error())
