@@ -20,12 +20,6 @@
 package image
 
 import (
-	"crypto/sha256"
-	"encoding/binary"
-	"encoding/hex"
-	"io"
-	"os"
-
 	"mynewt.apache.org/newt/util"
 )
 
@@ -42,13 +36,6 @@ type ImageHdrV1 struct {
 	Flags uint32
 	Vers  ImageVersion
 	Pad3  uint32
-}
-
-func (image *Image) SetKeyV1(key ImageKey, keyId uint8) error {
-	image.SetKeys([]ImageKey{key})
-	image.KeyId = keyId
-
-	return nil
 }
 
 func (key *ImageKey) sigHdrTypeV1() (uint32, error) {
@@ -72,6 +59,7 @@ func (key *ImageKey) sigHdrTypeV1() (uint32, error) {
 	}
 }
 
+/*
 func (image *Image) generateV1(loader *Image) error {
 	binFile, err := os.Open(image.SourceBin)
 	if err != nil {
@@ -94,9 +82,7 @@ func (image *Image) generateV1(loader *Image) error {
 	}
 	defer imgFile.Close()
 
-	/*
-	 * Compute hash while updating the file.
-	 */
+	// Compute hash while updating the file.
 	hash := sha256.New()
 
 	if loader != nil {
@@ -106,9 +92,7 @@ func (image *Image) generateV1(loader *Image) error {
 		}
 	}
 
-	/*
-	 * First the header
-	 */
+	// First the header
 	hdr := &ImageHdrV1{
 		Magic: IMAGEv1_MAGIC,
 		TlvSz: 0,
@@ -140,11 +124,9 @@ func (image *Image) generateV1(loader *Image) error {
 	}
 
 	if image.HeaderSize != 0 {
-		/*
-		 * Pad the header out to the given size.  There will
-		 * just be zeros between the header and the start of
-		 * the image when it is padded.
-		 */
+		// Pad the header out to the given size.  There will
+		// just be zeros between the header and the start of
+		// the image when it is padded.
 		if image.HeaderSize < IMAGE_HEADER_SIZE {
 			return util.FmtNewtError(
 				"Image header must be at least %d bytes", IMAGE_HEADER_SIZE)
@@ -164,10 +146,8 @@ func (image *Image) generateV1(loader *Image) error {
 	}
 
 	if image.HeaderSize > IMAGE_HEADER_SIZE {
-		/*
-		 * Pad the image (and hash) with zero bytes to fill
-		 * out the buffer.
-		 */
+		// Pad the image (and hash) with zero bytes to fill
+		// out the buffer.
 		buf := make([]byte, image.HeaderSize-IMAGE_HEADER_SIZE)
 
 		_, err = imgFile.Write(buf)
@@ -182,9 +162,7 @@ func (image *Image) generateV1(loader *Image) error {
 		}
 	}
 
-	/*
-	 * Followed by data.
-	 */
+	// Followed by data.
 	dataBuf := make([]byte, 1024)
 	for {
 		cnt, err := binFile.Read(dataBuf)
@@ -209,9 +187,7 @@ func (image *Image) generateV1(loader *Image) error {
 
 	image.Hash = hash.Sum(nil)
 
-	/*
-	 * Trailer with hash of the data
-	 */
+	// Trailer with hash of the data
 	tlv := &ImageTrailerTlv{
 		Type: IMAGEv1_TLV_SHA256,
 		Pad:  0,
@@ -250,3 +226,4 @@ func (image *Image) generateV1(loader *Image) error {
 
 	return nil
 }
+*/

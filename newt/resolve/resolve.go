@@ -331,7 +331,7 @@ func (r *Resolver) addPkg(lpkg *pkg.LocalPackage) (*ResolvePackage, bool) {
 	return rpkg, true
 }
 
-func (r *Resolver) sortedRpkgs() []*ResolvePackage {
+func (r *Resolver) SortedRpkgs() []*ResolvePackage {
 	rpkgs := make([]*ResolvePackage, 0, len(r.pkgMap))
 	for _, rpkg := range r.pkgMap {
 		rpkgs = append(rpkgs, rpkg)
@@ -347,7 +347,7 @@ func (r *Resolver) sortedRpkgs() []*ResolvePackage {
 func (r *Resolver) selectApiSuppliers() {
 	apiMap := map[string][]resolveApi{}
 
-	for _, rpkg := range r.sortedRpkgs() {
+	for _, rpkg := range r.SortedRpkgs() {
 		settings := r.cfg.AllSettingsForLpkg(rpkg.Lpkg)
 		apiStrings := rpkg.Lpkg.PkgY.GetSlice("pkg.apis", settings)
 		for _, entry := range apiStrings {

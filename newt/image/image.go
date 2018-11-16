@@ -39,15 +39,11 @@ import (
 	"io"
 	"io/ioutil"
 	"math/big"
-	"os"
-	"sort"
 	"strconv"
 	"strings"
 
 	keywrap "github.com/NickBall/go-aes-key-wrap"
-	log "github.com/Sirupsen/logrus"
 
-	"mynewt.apache.org/newt/newt/pkg"
 	"mynewt.apache.org/newt/util"
 )
 
@@ -57,9 +53,6 @@ var UseRsaPss = false
 
 // Use old image format
 var UseV1 = false
-
-// Public key file to encrypt image
-var PubKeyFile = ""
 
 type ImageVersion struct {
 	Major    uint8
@@ -72,18 +65,6 @@ type ImageKey struct {
 	// Only one of these members is non-nil.
 	Rsa *rsa.PrivateKey
 	Ec  *ecdsa.PrivateKey
-}
-
-type Image struct {
-	SourceBin  string
-	SourceImg  string
-	TargetImg  string
-	Version    ImageVersion
-	Keys       []ImageKey
-	KeyId      uint8
-	Hash       []byte
-	HeaderSize int // If non-zero pad out the header to this size.
-	TotalSize  int // Total size, in bytes, of the generated .img file.
 }
 
 type ImageHdr struct {
@@ -127,15 +108,6 @@ type ImageGenerateOpts struct {
 	Version           ImageVersion
 	SigKeys           []ImageKey
 	LoaderHash        []byte
-}
-
-type ImageWriteOpts struct {
-	LoaderSrcFilename string
-	LoaderDstFilename string
-	AppSrcFilename    string
-	AppDstFilename    string
-	Version           ImageVersion
-	SigKeys           []ImageKey
 }
 
 const (
@@ -194,67 +166,6 @@ var imageTlvTypeNameMap = map[uint8]string{
 	IMAGE_TLV_ENC_KEK:  "ENC_KEK",
 }
 
-/*
- * Data that's going to go to build manifest file
- */
-type ImageManifestSizeArea struct {
-	Name string `json:"name"`
-	Size uint32 `json:"size"`
-}
-
-type ImageManifestSizeSym struct {
-	Name  string                   `json:"name"`
-	Areas []*ImageManifestSizeArea `json:"areas"`
-}
-
-type ImageManifestSizeFile struct {
-	Name string                  `json:"name"`
-	Syms []*ImageManifestSizeSym `json:"sym"`
-}
-
-type ImageManifestSizePkg struct {
-	Name  string                   `json:"name"`
-	Files []*ImageManifestSizeFile `json:"files"`
-}
-
-type ImageManifestSizeCollector struct {
-	Pkgs []*ImageManifestSizePkg
-}
-
-type ImageManifest struct {
-	Name       string              `json:"name"`
-	Date       string              `json:"build_time"`
-	Version    string              `json:"build_version"`
-	BuildID    string              `json:"id"`
-	Image      string              `json:"image"`
-	ImageHash  string              `json:"image_hash"`
-	Loader     string              `json:"loader"`
-	LoaderHash string              `json:"loader_hash"`
-	Pkgs       []*ImageManifestPkg `json:"pkgs"`
-	LoaderPkgs []*ImageManifestPkg `json:"loader_pkgs,omitempty"`
-	TgtVars    []string            `json:"target"`
-	Repos      []ImageManifestRepo `json:"repos"`
-
-	PkgSizes       []*ImageManifestSizePkg `json:"pkgsz"`
-	LoaderPkgSizes []*ImageManifestSizePkg `json:"loader_pkgsz,omitempty"`
-}
-
-type ImageManifestPkg struct {
-	Name string `json:"name"`
-	Repo string `json:"repo"`
-}
-
-type ImageManifestRepo struct {
-	Name   string `json:"name"`
-	Commit string `json:"commit"`
-	Dirty  bool   `json:"dirty,omitempty"`
-	URL    string `json:"url,omitempty"`
-}
-
-type RepoManager struct {
-	repos map[string]ImageManifestRepo
-}
-
 type ECDSASig struct {
 	R *big.Int
 	S *big.Int
@@ -311,43 +222,6 @@ func ParseVersion(versStr string) (ImageVersion, error) {
 func (ver ImageVersion) String() string {
 	return fmt.Sprintf("%d.%d.%d.%d",
 		ver.Major, ver.Minor, ver.Rev, ver.BuildNum)
-}
-
-func NewImage(srcBinPath string, dstImgPath string) (*Image, error) {
-	image := &Image{}
-
-	image.SourceBin = srcBinPath
-	image.TargetImg = dstImgPath
-	return image, nil
-}
-
-func OldImage(imgPath string) (*Image, error) {
-	image := &Image{}
-
-	image.SourceImg = imgPath
-
-	return image, nil
-}
-
-func (image *Image) SetVersion(versStr string) error {
-	ver, err := ParseVersion(versStr)
-	if err != nil {
-		return err
-	}
-
-	log.Debugf("Assigning version number %d.%d.%d.%d\n",
-		ver.Major, ver.Minor, ver.Rev, ver.BuildNum)
-
-	image.Version = ver
-
-	buf := new(bytes.Buffer)
-	err = binary.Write(buf, binary.LittleEndian, image.Version)
-	if err != nil {
-		fmt.Printf("Bombing out\n")
-		return nil
-	}
-
-	return nil
 }
 
 func ParsePrivateKey(keyBytes []byte) (interface{}, error) {
@@ -460,10 +334,6 @@ func (key *ImageKey) assertValid() {
 	}
 }
 
-func (image *Image) SetKeys(keys []ImageKey) {
-	image.Keys = keys
-}
-
 func (key *ImageKey) sigKeyHash() ([]uint8, error) {
 	key.assertValid()
 
@@ -534,6 +404,7 @@ func (key *ImageKey) sigTlvType() uint8 {
 	}
 }
 
+/*
 func (image *Image) ReSign() error {
 	srcImg, err := os.Open(image.SourceImg)
 	if err != nil {
@@ -615,8 +486,10 @@ func (image *Image) ReSign() error {
 	image.TargetImg = image.SourceImg
 	image.HeaderSize = int(hdrSz)
 
-	return image.Generate(nil)
+	//return image.Generate(nil)
+	return nil
 }
+*/
 
 func generateEncTlv(cipherSecret []byte) (RawImageTlv, error) {
 	var encType uint8
@@ -822,106 +695,6 @@ func GenerateImage(opts ImageGenerateOpts) (RawImage, error) {
 	}
 
 	return ri, nil
-}
-
-func writeLoader(opts ImageWriteOpts) ([]byte, error) {
-	igo := ImageGenerateOpts{
-		SrcBinFilename:    opts.LoaderSrcFilename,
-		SrcEncKeyFilename: PubKeyFile,
-		Version:           opts.Version,
-		SigKeys:           opts.SigKeys,
-	}
-
-	ri, err := GenerateImage(igo)
-	if err != nil {
-		return nil, err
-	}
-
-	hash, err := ri.Hash()
-	if err != nil {
-		return nil, err
-	}
-
-	imgFile, err := os.OpenFile(opts.LoaderDstFilename,
-		os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0666)
-	if err != nil {
-		return nil, util.FmtNewtError(
-			"Can't open target image %s: %s",
-			opts.LoaderDstFilename, err.Error())
-	}
-	defer imgFile.Close()
-
-	if _, err := ri.Write(imgFile); err != nil {
-		return nil, err
-	}
-
-	return hash, nil
-}
-
-func writeApp(opts ImageWriteOpts, loaderHash []byte) error {
-	igo := ImageGenerateOpts{
-		SrcBinFilename:    opts.AppSrcFilename,
-		SrcEncKeyFilename: PubKeyFile,
-		Version:           opts.Version,
-		SigKeys:           opts.SigKeys,
-		LoaderHash:        loaderHash,
-	}
-
-	ri, err := GenerateImage(igo)
-	if err != nil {
-		return err
-	}
-
-	imgFile, err := os.OpenFile(opts.AppDstFilename,
-		os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0666)
-	if err != nil {
-		return util.FmtNewtError(
-			"Can't open target image %s: %s", opts.AppDstFilename, err.Error())
-	}
-	defer imgFile.Close()
-
-	if _, err := ri.Write(imgFile); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func WriteImages(opts ImageWriteOpts) error {
-	var loaderHash []byte
-
-	if opts.LoaderSrcFilename != "" {
-		var err error
-		loaderHash, err = writeLoader(opts)
-		if err != nil {
-			return err
-		}
-	}
-
-	if err := writeApp(opts, loaderHash); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (image *Image) generateV2(loader *Image) error {
-	opts := ImageGenerateOpts{
-		SrcBinFilename:    image.SourceBin,
-		SrcEncKeyFilename: PubKeyFile,
-		Version:           image.Version,
-		SigKeys:           image.Keys,
-	}
-
-	if loader != nil {
-		opts.LoaderHash = loader.Hash
-	}
-
-	if _, err := GenerateImage(opts); err != nil {
-		return err
-	}
-
-	return nil
 }
 
 func parseEncKeyPem(keyBytes []byte, plainSecret []byte) ([]byte, error) {
@@ -1177,167 +950,4 @@ func (ic *ImageCreator) Create() (RawImage, error) {
 		uint16(totalSize - int(ri.Header.HdrSz) - len(ri.Body))
 
 	return ri, nil
-}
-
-func (image *Image) Generate(loader *Image) error {
-	if UseV1 {
-		return image.generateV1(loader)
-	} else {
-		return image.generateV2(loader)
-	}
-}
-
-func CreateBuildId(app *Image, loader *Image) []byte {
-	return app.Hash
-}
-
-func NewRepoManager() *RepoManager {
-	return &RepoManager{
-		repos: make(map[string]ImageManifestRepo),
-	}
-}
-
-func (r *RepoManager) GetImageManifestPkg(
-	lpkg *pkg.LocalPackage) *ImageManifestPkg {
-
-	ip := &ImageManifestPkg{
-		Name: lpkg.Name(),
-	}
-
-	var path string
-	if lpkg.Repo().IsLocal() {
-		ip.Repo = lpkg.Repo().Name()
-		path = lpkg.BasePath()
-	} else {
-		ip.Repo = lpkg.Repo().Name()
-		path = lpkg.BasePath()
-	}
-
-	if _, present := r.repos[ip.Repo]; present {
-		return ip
-	}
-
-	repo := ImageManifestRepo{
-		Name: ip.Repo,
-	}
-
-	// Make sure we restore the current working dir to whatever it was when
-	// this function was called
-	cwd, err := os.Getwd()
-	if err != nil {
-		log.Debugf("Unable to determine current working directory: %v", err)
-		return ip
-	}
-	defer os.Chdir(cwd)
-
-	if err := os.Chdir(path); err != nil {
-		return ip
-	}
-
-	var res []byte
-
-	res, err = util.ShellCommand([]string{
-		"git",
-		"rev-parse",
-		"HEAD",
-	}, nil)
-	if err != nil {
-		log.Debugf("Unable to determine commit hash for %s: %v", path, err)
-		repo.Commit = "UNKNOWN"
-	} else {
-		repo.Commit = strings.TrimSpace(string(res))
-		res, err = util.ShellCommand([]string{
-			"git",
-			"status",
-			"--porcelain",
-		}, nil)
-		if err != nil {
-			log.Debugf("Unable to determine dirty state for %s: %v", path, err)
-		} else {
-			if len(res) > 0 {
-				repo.Dirty = true
-			}
-		}
-		res, err = util.ShellCommand([]string{
-			"git",
-			"config",
-			"--get",
-			"remote.origin.url",
-		}, nil)
-		if err != nil {
-			log.Debugf("Unable to determine URL for %s: %v", path, err)
-		} else {
-			repo.URL = strings.TrimSpace(string(res))
-		}
-	}
-	r.repos[ip.Repo] = repo
-
-	return ip
-}
-
-func (r *RepoManager) AllRepos() []ImageManifestRepo {
-	keys := make([]string, 0, len(r.repos))
-	for k := range r.repos {
-		keys = append(keys, k)
-	}
-
-	sort.Strings(keys)
-
-	repos := make([]ImageManifestRepo, 0, len(keys))
-	for _, key := range keys {
-		repos = append(repos, r.repos[key])
-	}
-
-	return repos
-}
-
-func NewImageManifestSizeCollector() *ImageManifestSizeCollector {
-	return &ImageManifestSizeCollector{}
-}
-
-func (c *ImageManifestSizeCollector) AddPkg(pkg string) *ImageManifestSizePkg {
-	p := &ImageManifestSizePkg{
-		Name: pkg,
-	}
-	c.Pkgs = append(c.Pkgs, p)
-
-	return p
-}
-
-func (c *ImageManifestSizePkg) AddSymbol(file string, sym string, area string,
-	symSz uint32) {
-	f := c.addFile(file)
-	s := f.addSym(sym)
-	s.addArea(area, symSz)
-}
-
-func (p *ImageManifestSizePkg) addFile(file string) *ImageManifestSizeFile {
-	for _, f := range p.Files {
-		if f.Name == file {
-			return f
-		}
-	}
-	f := &ImageManifestSizeFile{
-		Name: file,
-	}
-	p.Files = append(p.Files, f)
-
-	return f
-}
-
-func (f *ImageManifestSizeFile) addSym(sym string) *ImageManifestSizeSym {
-	s := &ImageManifestSizeSym{
-		Name: sym,
-	}
-	f.Syms = append(f.Syms, s)
-
-	return s
-}
-
-func (s *ImageManifestSizeSym) addArea(area string, areaSz uint32) {
-	a := &ImageManifestSizeArea{
-		Name: area,
-		Size: areaSz,
-	}
-	s.Areas = append(s.Areas, a)
 }

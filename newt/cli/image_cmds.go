@@ -23,8 +23,10 @@ import (
 	"strconv"
 
 	"github.com/spf13/cobra"
+
 	"mynewt.apache.org/newt/newt/builder"
 	"mynewt.apache.org/newt/newt/image"
+	"mynewt.apache.org/newt/newt/imgprod"
 	"mynewt.apache.org/newt/newt/newtutil"
 	"mynewt.apache.org/newt/util"
 )
@@ -32,6 +34,7 @@ import (
 var useV1 bool
 var useV2 bool
 var retain bool
+var encKeyFilename string
 
 // @return                      keys, key ID, error
 func parseKeyArgs(args []string) ([]image.ImageKey, uint8, error) {
@@ -105,39 +108,30 @@ func createImageRunCmd(cmd *cobra.Command, args []string) {
 		NewtUsage(nil, err)
 	}
 
-	opts := image.ImageWriteOpts{
-		AppSrcFilename: b.AppBuilder.AppBinPath(),
-		AppDstFilename: b.AppBuilder.AppImgPath(),
-		Version:        ver,
-		SigKeys:        keys,
-	}
-
-	if b.LoaderBuilder != nil {
-		opts.LoaderSrcFilename = b.LoaderBuilder.AppBinPath()
-		opts.LoaderDstFilename = b.LoaderBuilder.AppImgPath()
-	}
-
-	if err := image.WriteImages(opts); err != nil {
+	if err := imgprod.ProduceAll(b, ver, keys, encKeyFilename); err != nil {
 		NewtUsage(nil, err)
 	}
 }
 
 func resignImage(imgName string, keys []image.ImageKey, keyId uint8) error {
-	img, err := image.OldImage(imgName)
-	if err != nil {
-		return err
-	}
-
-	if image.UseV1 {
-		img.SetKeyV1(keys[0], keyId)
-	} else {
-		if retain {
-			keys = append(img.Keys, keys...)
+	/*
+		img, err := image.OldImage(imgName)
+		if err != nil {
+			return err
 		}
-		img.SetKeys(keys)
-	}
 
-	return img.ReSign()
+		if image.UseV1 {
+			img.SetKeyV1(keys[0], keyId)
+		} else {
+			if retain {
+				keys = append(img.Keys, keys...)
+			}
+			img.SetKeys(keys)
+		}
+
+		return img.ReSign()
+	*/
+	return nil
 }
 
 func resignImageRunCmd(cmd *cobra.Command, args []string) {
@@ -214,7 +208,7 @@ func AddImageCommands(cmd *cobra.Command) {
 		"1", "1", false, "Use old image header format")
 	createImageCmd.PersistentFlags().BoolVarP(&useV2,
 		"2", "2", false, "Use new image header format")
-	createImageCmd.PersistentFlags().StringVarP(&image.PubKeyFile,
+	createImageCmd.PersistentFlags().StringVarP(&encKeyFilename,
 		"encrypt", "e", "", "Encrypt image using this public key")
 
 	cmd.AddCommand(createImageCmd)
@@ -250,7 +244,7 @@ func AddImageCommands(cmd *cobra.Command) {
 		"1", "1", false, "Use old image header format")
 	resignImageCmd.PersistentFlags().BoolVarP(&useV2,
 		"2", "2", false, "Use new image header format")
-	resignImageCmd.PersistentFlags().StringVarP(&image.PubKeyFile,
+	resignImageCmd.PersistentFlags().StringVarP(&encKeyFilename,
 		"encrypt", "e", "", "Encrypt image using this public key")
 	resignImageCmd.PersistentFlags().BoolVarP(&retain,
 		"retain", "r", false, "Preserve old signatures; append new ones")

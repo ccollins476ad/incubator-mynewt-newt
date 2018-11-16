@@ -24,6 +24,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"mynewt.apache.org/newt/newt/image"
+	"mynewt.apache.org/newt/newt/imgprod"
 	"mynewt.apache.org/newt/newt/newtutil"
 	"mynewt.apache.org/newt/newt/parse"
 	"mynewt.apache.org/newt/util"
@@ -60,9 +61,9 @@ func runRunCmd(cmd *cobra.Command, args []string) {
 			NewtUsage(nil, err)
 		}
 	} else {
-		var version string = ""
+		var verStr string
 		if len(args) > 1 {
-			version = args[1]
+			verStr = args[1]
 		} else {
 			// If user did not provide version number and the target is not a
 			// bootloader and doesn't run in the simulator, then ask the user
@@ -78,29 +79,31 @@ func runRunCmd(cmd *cobra.Command, args []string) {
 			if !parse.ValueIsTrue(settings["BOOT_LOADER"]) &&
 				!parse.ValueIsTrue(settings["BSP_SIMULATED"]) {
 
-				version = "0"
+				verStr = "0"
 				fmt.Println("Enter image version(default 0):")
-				fmt.Scanf("%s\n", &version)
+				fmt.Scanf("%s\n", &verStr)
 			}
+		}
+		ver, err := image.ParseVersion(verStr)
+		if err != nil {
+			NewtUsage(cmd, err)
 		}
 		if err := b.Build(); err != nil {
 			NewtUsage(nil, err)
 		}
 
-		if len(version) > 0 {
+		if len(verStr) > 0 {
 			var keys []image.ImageKey
-			var keyId uint8
 
 			if len(args) > 2 {
-				keys, keyId, err = parseKeyArgs(args[2:])
+				keys, _, err = parseKeyArgs(args[2:])
 				if err != nil {
 					NewtUsage(cmd, err)
 				}
 			}
 
-			_, _, err = b.CreateImages(version, keys, keyId)
-			if err != nil {
-				NewtUsage(cmd, err)
+			if err := imgprod.ProduceAll(b, ver, keys, ""); err != nil {
+				NewtUsage(nil, err)
 			}
 		}
 
