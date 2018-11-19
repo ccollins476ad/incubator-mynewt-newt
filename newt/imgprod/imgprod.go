@@ -5,8 +5,8 @@ import (
 	"os"
 	"strings"
 
+	"mynewt.apache.org/newt/artifact/image"
 	"mynewt.apache.org/newt/newt/builder"
-	"mynewt.apache.org/newt/newt/image"
 	"mynewt.apache.org/newt/newt/manifest"
 	"mynewt.apache.org/newt/newt/newtutil"
 	"mynewt.apache.org/newt/util"

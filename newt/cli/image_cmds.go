@@ -24,8 +24,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"mynewt.apache.org/newt/artifact/image"
 	"mynewt.apache.org/newt/newt/builder"
-	"mynewt.apache.org/newt/newt/image"
 	"mynewt.apache.org/newt/newt/imgprod"
 	"mynewt.apache.org/newt/newt/newtutil"
 	"mynewt.apache.org/newt/util"

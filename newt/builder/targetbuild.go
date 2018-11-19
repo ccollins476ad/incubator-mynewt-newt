@@ -32,8 +32,9 @@ import (
 
 	log "github.com/Sirupsen/logrus"
 
-	"mynewt.apache.org/newt/newt/flash"
-	"mynewt.apache.org/newt/newt/image"
+	"mynewt.apache.org/newt/artifact/flash"
+	"mynewt.apache.org/newt/artifact/image"
+	"mynewt.apache.org/newt/newt/emit"
 	"mynewt.apache.org/newt/newt/interfaces"
 	"mynewt.apache.org/newt/newt/pkg"
 	"mynewt.apache.org/newt/newt/project"
@@ -263,7 +264,10 @@ func (t *TargetBuilder) validateAndWriteCfg() error {
 	}
 
 	// Generate flash map.
-	if err := t.bspPkg.FlashMap.EnsureWritten(srcDir, incDir,
+	if err := emit.EnsureFlashMapWritten(
+		t.bspPkg.FlashMap,
+		srcDir,
+		incDir,
 		pkg.ShortName(t.target.Package())); err != nil {
 
 		return err

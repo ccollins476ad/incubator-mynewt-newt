@@ -25,7 +25,7 @@ import (
 	log "github.com/Sirupsen/logrus"
 	"github.com/spf13/cobra"
 
-	"mynewt.apache.org/newt/newt/image"
+	"mynewt.apache.org/newt/artifact/image"
 	"mynewt.apache.org/newt/util"
 )
 

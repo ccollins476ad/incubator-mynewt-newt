@@ -24,7 +24,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 
-	"mynewt.apache.org/newt/newt/flash"
+	"mynewt.apache.org/newt/artifact/flash"
 	"mynewt.apache.org/newt/util"
 )
 

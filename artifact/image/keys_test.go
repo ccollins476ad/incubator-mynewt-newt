@@ -24,8 +24,6 @@ import (
 	"os"
 	"path"
 	"testing"
-
-	"mynewt.apache.org/newt/newt/image"
 )
 
 func TestRSA(t *testing.T) {

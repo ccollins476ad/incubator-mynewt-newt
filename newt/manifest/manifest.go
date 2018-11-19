@@ -12,9 +12,9 @@ import (
 
 	log "github.com/Sirupsen/logrus"
 
+	"mynewt.apache.org/newt/artifact/flash"
+	"mynewt.apache.org/newt/artifact/image"
 	"mynewt.apache.org/newt/newt/builder"
-	"mynewt.apache.org/newt/newt/flash"
-	"mynewt.apache.org/newt/newt/image"
 	"mynewt.apache.org/newt/newt/pkg"
 	"mynewt.apache.org/newt/newt/syscfg"
 	"mynewt.apache.org/newt/util"

@@ -34,7 +34,7 @@ import (
 	log "github.com/Sirupsen/logrus"
 	"github.com/spf13/cast"
 
-	"mynewt.apache.org/newt/newt/flash"
+	"mynewt.apache.org/newt/artifact/flash"
 	"mynewt.apache.org/newt/newt/interfaces"
 	"mynewt.apache.org/newt/newt/newtutil"
 	"mynewt.apache.org/newt/newt/parse"

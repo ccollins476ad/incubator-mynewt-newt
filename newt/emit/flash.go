@@ -17,7 +17,7 @@
  * under the License.
  */
 
-package flash
+package emit
 
 import (
 	"bytes"
@@ -43,7 +43,7 @@ const C_VAR_COMMENT = `/**
  */
 `
 
-func varDecl(fm flash.FlashMap) string {
+func flashMapVarDecl(fm flash.FlashMap) string {
 	return fmt.Sprintf("const struct flash_area %s[%d]", C_VAR_NAME,
 		len(fm.Areas))
 }
@@ -61,7 +61,7 @@ func writeFlashMapHeader(w io.Writer, fm flash.FlashMap) {
 	fmt.Fprintf(w, "#include \"flash_map/flash_map.h\"\n")
 	fmt.Fprintf(w, "\n")
 	fmt.Fprintf(w, "%s", C_VAR_COMMENT)
-	fmt.Fprintf(w, "extern %s;\n", varDecl(fm))
+	fmt.Fprintf(w, "extern %s;\n", flashMapVarDecl(fm))
 	fmt.Fprintf(w, "\n")
 
 	for _, area := range fm.SortedAreas() {
@@ -96,7 +96,7 @@ func writeFlashMapSrc(w io.Writer, fm flash.FlashMap) {
 	fmt.Fprintf(w, "#include \"%s\"\n", HEADER_PATH)
 	fmt.Fprintf(w, "\n")
 	fmt.Fprintf(w, "%s", C_VAR_COMMENT)
-	fmt.Fprintf(w, "%s = {", varDecl(fm))
+	fmt.Fprintf(w, "%s = {", flashMapVarDecl(fm))
 
 	for _, area := range fm.SortedAreas() {
 		fmt.Fprintf(w, "\n")

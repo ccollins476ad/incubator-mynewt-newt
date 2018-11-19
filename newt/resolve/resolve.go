@@ -26,7 +26,7 @@ import (
 
 	log "github.com/Sirupsen/logrus"
 
-	"mynewt.apache.org/newt/newt/flash"
+	"mynewt.apache.org/newt/artifact/flash"
 	"mynewt.apache.org/newt/newt/logcfg"
 	"mynewt.apache.org/newt/newt/parse"
 	"mynewt.apache.org/newt/newt/pkg"
