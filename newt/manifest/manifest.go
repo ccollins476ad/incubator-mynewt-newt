@@ -1,10 +1,7 @@
 package manifest
 
 import (
-	"encoding/json"
 	"fmt"
-	"io"
-	"io/ioutil"
 	"os"
 	"sort"
 	"strings"
@@ -14,59 +11,18 @@ import (
 
 	"mynewt.apache.org/newt/artifact/flash"
 	"mynewt.apache.org/newt/artifact/image"
+	"mynewt.apache.org/newt/artifact/manifest"
 	"mynewt.apache.org/newt/newt/builder"
 	"mynewt.apache.org/newt/newt/pkg"
 	"mynewt.apache.org/newt/newt/syscfg"
 	"mynewt.apache.org/newt/util"
 )
 
-/*
- * Data that's going to go to build manifest file
- */
-type ManifestSizeArea struct {
-	Name string `json:"name"`
-	Size uint32 `json:"size"`
-}
-
-type ManifestSizeSym struct {
-	Name  string              `json:"name"`
-	Areas []*ManifestSizeArea `json:"areas"`
-}
-
-type ManifestSizeFile struct {
-	Name string             `json:"name"`
-	Syms []*ManifestSizeSym `json:"sym"`
-}
-
-type ManifestSizePkg struct {
-	Name  string              `json:"name"`
-	Files []*ManifestSizeFile `json:"files"`
-}
-
 type ManifestSizeCollector struct {
-	Pkgs []*ManifestSizePkg
+	Pkgs []*manifest.ManifestSizePkg
 }
 
-type Manifest struct {
-	Name       string            `json:"name"`
-	Date       string            `json:"build_time"`
-	Version    string            `json:"build_version"`
-	BuildID    string            `json:"id"`
-	Image      string            `json:"image"`
-	ImageHash  string            `json:"image_hash"`
-	Loader     string            `json:"loader"`
-	LoaderHash string            `json:"loader_hash"`
-	Pkgs       []*ManifestPkg    `json:"pkgs"`
-	LoaderPkgs []*ManifestPkg    `json:"loader_pkgs,omitempty"`
-	TgtVars    []string          `json:"target"`
-	Repos      []*ManifestRepo   `json:"repos"`
-	FlashAreas []flash.FlashArea `json:"flash_map"`
-
-	PkgSizes       []*ManifestSizePkg `json:"pkgsz"`
-	LoaderPkgSizes []*ManifestSizePkg `json:"loader_pkgsz,omitempty"`
-}
-
-type ManifestOpts struct {
+type ManifestCreateOpts struct {
 	TgtBldr    *builder.TargetBuilder
 	LoaderHash []byte
 	AppHash    []byte
@@ -75,29 +31,17 @@ type ManifestOpts struct {
 	FlashAreas []flash.FlashArea
 }
 
-type ManifestPkg struct {
-	Name string `json:"name"`
-	Repo string `json:"repo"`
-}
-
-type ManifestRepo struct {
-	Name   string `json:"name"`
-	Commit string `json:"commit"`
-	Dirty  bool   `json:"dirty,omitempty"`
-	URL    string `json:"url,omitempty"`
-}
-
 type RepoManager struct {
-	repos map[string]ManifestRepo
+	repos map[string]manifest.ManifestRepo
 }
 
 func NewRepoManager() *RepoManager {
 	return &RepoManager{
-		repos: make(map[string]ManifestRepo),
+		repos: make(map[string]manifest.ManifestRepo),
 	}
 }
 
-func (r *RepoManager) AllRepos() []*ManifestRepo {
+func (r *RepoManager) AllRepos() []*manifest.ManifestRepo {
 	keys := make([]string, 0, len(r.repos))
 	for k := range r.repos {
 		keys = append(keys, k)
@@ -105,7 +49,7 @@ func (r *RepoManager) AllRepos() []*ManifestRepo {
 
 	sort.Strings(keys)
 
-	repos := make([]*ManifestRepo, 0, len(keys))
+	repos := make([]*manifest.ManifestRepo, 0, len(keys))
 	for _, key := range keys {
 		r := r.repos[key]
 		repos = append(repos, &r)
@@ -114,8 +58,8 @@ func (r *RepoManager) AllRepos() []*ManifestRepo {
 	return repos
 }
 
-func (c *ManifestSizeCollector) AddPkg(pkg string) *ManifestSizePkg {
-	p := &ManifestSizePkg{
+func (c *ManifestSizeCollector) AddPkg(pkg string) *manifest.ManifestSizePkg {
+	p := &manifest.ManifestSizePkg{
 		Name: pkg,
 	}
 	c.Pkgs = append(c.Pkgs, p)
@@ -123,21 +67,21 @@ func (c *ManifestSizeCollector) AddPkg(pkg string) *ManifestSizePkg {
 	return p
 }
 
-func (c *ManifestSizePkg) AddSymbol(file string, sym string, area string,
+func AddSymbol(p *manifest.ManifestSizePkg, file string, sym string, area string,
 	symSz uint32) {
 
-	f := c.addFile(file)
-	s := f.addSym(sym)
-	s.addArea(area, symSz)
+	f := addFile(p, file)
+	s := addSym(f, sym)
+	addArea(s, area, symSz)
 }
 
-func (p *ManifestSizePkg) addFile(file string) *ManifestSizeFile {
+func addFile(p *manifest.ManifestSizePkg, file string) *manifest.ManifestSizeFile {
 	for _, f := range p.Files {
 		if f.Name == file {
 			return f
 		}
 	}
-	f := &ManifestSizeFile{
+	f := &manifest.ManifestSizeFile{
 		Name: file,
 	}
 	p.Files = append(p.Files, f)
@@ -145,8 +89,8 @@ func (p *ManifestSizePkg) addFile(file string) *ManifestSizeFile {
 	return f
 }
 
-func (f *ManifestSizeFile) addSym(sym string) *ManifestSizeSym {
-	s := &ManifestSizeSym{
+func addSym(f *manifest.ManifestSizeFile, sym string) *manifest.ManifestSizeSym {
+	s := &manifest.ManifestSizeSym{
 		Name: sym,
 	}
 	f.Syms = append(f.Syms, s)
@@ -154,16 +98,18 @@ func (f *ManifestSizeFile) addSym(sym string) *ManifestSizeSym {
 	return s
 }
 
-func (s *ManifestSizeSym) addArea(area string, areaSz uint32) {
-	a := &ManifestSizeArea{
+func addArea(s *manifest.ManifestSizeSym, area string, areaSz uint32) {
+	a := &manifest.ManifestSizeArea{
 		Name: area,
 		Size: areaSz,
 	}
 	s.Areas = append(s.Areas, a)
 }
 
-func (r *RepoManager) GetManifestPkg(lpkg *pkg.LocalPackage) *ManifestPkg {
-	ip := &ManifestPkg{
+func (r *RepoManager) GetManifestPkg(
+	lpkg *pkg.LocalPackage) *manifest.ManifestPkg {
+
+	ip := &manifest.ManifestPkg{
 		Name: lpkg.FullName(),
 	}
 
@@ -180,7 +126,7 @@ func (r *RepoManager) GetManifestPkg(lpkg *pkg.LocalPackage) *ManifestPkg {
 		return ip
 	}
 
-	repo := ManifestRepo{
+	repo := manifest.ManifestRepo{
 		Name: ip.Repo,
 	}
 
@@ -238,23 +184,6 @@ func (r *RepoManager) GetManifestPkg(lpkg *pkg.LocalPackage) *ManifestPkg {
 	return ip
 }
 
-func ReadManifest(path string) (Manifest, error) {
-	m := Manifest{}
-
-	content, err := ioutil.ReadFile(path)
-	if err != nil {
-		return m, util.ChildNewtError(err)
-	}
-
-	if err := json.Unmarshal(content, &m); err != nil {
-		return m, util.FmtNewtError(
-			"Failure decoding manifest with path \"%s\": %s",
-			path, err.Error())
-	}
-
-	return m, nil
-}
-
 func ManifestPkgSizes(b *builder.Builder) (ManifestSizeCollector, error) {
 	msc := ManifestSizeCollector{}
 
@@ -286,7 +215,7 @@ func ManifestPkgSizes(b *builder.Builder) (ManifestSizeCollector, error) {
 		for _, sym := range symbols {
 			for area, areaSz := range sym.Sizes {
 				if areaSz != 0 {
-					p.AddSymbol(sym.ObjName, sym.Name, area, areaSz)
+					AddSymbol(p, sym.ObjName, sym.Name, area, areaSz)
 				}
 			}
 		}
@@ -295,10 +224,10 @@ func ManifestPkgSizes(b *builder.Builder) (ManifestSizeCollector, error) {
 	return msc, nil
 }
 
-func CreateManifest(opts ManifestOpts) (Manifest, error) {
+func CreateManifest(opts ManifestCreateOpts) (manifest.Manifest, error) {
 	t := opts.TgtBldr
 
-	m := Manifest{
+	m := manifest.Manifest{
 		Name:       t.GetTarget().FullName(),
 		Date:       time.Now().Format(time.RFC3339),
 		Version:    opts.Version.String(),
@@ -352,18 +281,4 @@ func CreateManifest(opts ManifestOpts) (Manifest, error) {
 	}
 
 	return m, nil
-}
-
-func (m *Manifest) Write(w io.Writer) (int, error) {
-	buffer, err := json.MarshalIndent(m, "", "  ")
-	if err != nil {
-		return 0, util.FmtNewtError("Cannot encode manifest: %s", err.Error())
-	}
-
-	cnt, err := w.Write(buffer)
-	if err != nil {
-		return 0, util.FmtNewtError("Cannot write manifest: %s", err.Error())
-	}
-
-	return cnt, nil
 }

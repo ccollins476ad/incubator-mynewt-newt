@@ -28,8 +28,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"mynewt.apache.org/newt/artifact/flash"
+	"mynewt.apache.org/newt/artifact/manifest"
 	"mynewt.apache.org/newt/mimg/mfg"
-	"mynewt.apache.org/newt/newt/manifest"
 	"mynewt.apache.org/newt/util"
 )
 
