@@ -34,7 +34,7 @@ import (
 
 	"mynewt.apache.org/newt/artifact/flash"
 	"mynewt.apache.org/newt/artifact/image"
-	"mynewt.apache.org/newt/newt/emit"
+	"mynewt.apache.org/newt/newt/flashmap"
 	"mynewt.apache.org/newt/newt/interfaces"
 	"mynewt.apache.org/newt/newt/pkg"
 	"mynewt.apache.org/newt/newt/project"
@@ -264,7 +264,7 @@ func (t *TargetBuilder) validateAndWriteCfg() error {
 	}
 
 	// Generate flash map.
-	if err := emit.EnsureFlashMapWritten(
+	if err := flashmap.EnsureFlashMapWritten(
 		t.bspPkg.FlashMap,
 		srcDir,
 		incDir,
