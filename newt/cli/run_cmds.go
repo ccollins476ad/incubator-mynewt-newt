@@ -84,15 +84,16 @@ func runRunCmd(cmd *cobra.Command, args []string) {
 				fmt.Scanf("%s\n", &verStr)
 			}
 		}
-		ver, err := image.ParseVersion(verStr)
-		if err != nil {
-			NewtUsage(cmd, err)
-		}
-		if err := b.Build(); err != nil {
-			NewtUsage(nil, err)
-		}
 
 		if len(verStr) > 0 {
+			ver, err := image.ParseVersion(verStr)
+			if err != nil {
+				NewtUsage(cmd, err)
+			}
+			if err := b.Build(); err != nil {
+				NewtUsage(nil, err)
+			}
+
 			var keys []image.ImageKey
 
 			if len(args) > 2 {

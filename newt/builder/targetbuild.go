@@ -104,6 +104,10 @@ func NewTargetBuilder(target *target.Target) (*TargetBuilder, error) {
 	return NewTargetTester(target, nil)
 }
 
+func (t *TargetBuilder) BspPkg() *pkg.BspPackage {
+	return t.bspPkg
+}
+
 func (t *TargetBuilder) NewCompiler(dstDir string, buildProfile string) (
 	*toolchain.Compiler, error) {
 

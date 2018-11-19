@@ -60,11 +60,11 @@ const C_VAR_COMMENT = `/**
 `
 
 type FlashArea struct {
-	Name   string
-	Id     int
-	Device int
-	Offset int
-	Size   int
+	Name   string `json:"name"`
+	Id     int    `json:"id"`
+	Device int    `json:"device"`
+	Offset int    `json:"offset"`
+	Size   int    `json:"size"`
 }
 
 type FlashMap struct {
@@ -179,6 +179,23 @@ func parseFlashArea(
 	return area, nil
 }
 
+func SortFlashAreas(areas []FlashArea) []FlashArea {
+	idMap := make(map[int]FlashArea, len(areas))
+	ids := make([]int, 0, len(areas))
+	for _, area := range areas {
+		idMap[area.Id] = area
+		ids = append(ids, area.Id)
+	}
+	sort.Ints(ids)
+
+	sorted := make([]FlashArea, len(ids))
+	for i, id := range ids {
+		sorted[i] = idMap[id]
+	}
+
+	return sorted
+}
+
 func (flashMap FlashMap) unSortedAreas() []FlashArea {
 	areas := make([]FlashArea, 0, len(flashMap.Areas))
 	for _, area := range flashMap.Areas {
@@ -189,20 +206,7 @@ func (flashMap FlashMap) unSortedAreas() []FlashArea {
 }
 
 func (flashMap FlashMap) SortedAreas() []FlashArea {
-	idMap := make(map[int]FlashArea, len(flashMap.Areas))
-	ids := make([]int, 0, len(flashMap.Areas))
-	for _, area := range flashMap.Areas {
-		idMap[area.Id] = area
-		ids = append(ids, area.Id)
-	}
-	sort.Ints(ids)
-
-	areas := make([]FlashArea, len(ids))
-	for i, id := range ids {
-		areas[i] = idMap[id]
-	}
-
-	return areas
+	return SortFlashAreas(flashMap.unSortedAreas())
 }
 
 func (flashMap FlashMap) DeviceIds() []int {

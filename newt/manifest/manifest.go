@@ -13,6 +13,7 @@ import (
 	log "github.com/Sirupsen/logrus"
 
 	"mynewt.apache.org/newt/newt/builder"
+	"mynewt.apache.org/newt/newt/flash"
 	"mynewt.apache.org/newt/newt/image"
 	"mynewt.apache.org/newt/newt/pkg"
 	"mynewt.apache.org/newt/newt/syscfg"
@@ -47,18 +48,19 @@ type ManifestSizeCollector struct {
 }
 
 type Manifest struct {
-	Name       string          `json:"name"`
-	Date       string          `json:"build_time"`
-	Version    string          `json:"build_version"`
-	BuildID    string          `json:"id"`
-	Image      string          `json:"image"`
-	ImageHash  string          `json:"image_hash"`
-	Loader     string          `json:"loader"`
-	LoaderHash string          `json:"loader_hash"`
-	Pkgs       []*ManifestPkg  `json:"pkgs"`
-	LoaderPkgs []*ManifestPkg  `json:"loader_pkgs,omitempty"`
-	TgtVars    []string        `json:"target"`
-	Repos      []*ManifestRepo `json:"repos"`
+	Name       string            `json:"name"`
+	Date       string            `json:"build_time"`
+	Version    string            `json:"build_version"`
+	BuildID    string            `json:"id"`
+	Image      string            `json:"image"`
+	ImageHash  string            `json:"image_hash"`
+	Loader     string            `json:"loader"`
+	LoaderHash string            `json:"loader_hash"`
+	Pkgs       []*ManifestPkg    `json:"pkgs"`
+	LoaderPkgs []*ManifestPkg    `json:"loader_pkgs,omitempty"`
+	TgtVars    []string          `json:"target"`
+	Repos      []*ManifestRepo   `json:"repos"`
+	FlashAreas []flash.FlashArea `json:"flash_map"`
 
 	PkgSizes       []*ManifestSizePkg `json:"pkgsz"`
 	LoaderPkgSizes []*ManifestSizePkg `json:"loader_pkgsz,omitempty"`
@@ -70,6 +72,7 @@ type ManifestOpts struct {
 	AppHash    []byte
 	Version    image.ImageVersion
 	BuildID    string
+	FlashAreas []flash.FlashArea
 }
 
 type ManifestPkg struct {
@@ -296,12 +299,13 @@ func CreateManifest(opts ManifestOpts) (Manifest, error) {
 	t := opts.TgtBldr
 
 	m := Manifest{
-		Name:      t.GetTarget().FullName(),
-		Date:      time.Now().Format(time.RFC3339),
-		Version:   opts.Version.String(),
-		BuildID:   opts.BuildID,
-		Image:     t.AppBuilder.AppImgPath(),
-		ImageHash: fmt.Sprintf("%x", opts.AppHash),
+		Name:       t.GetTarget().FullName(),
+		Date:       time.Now().Format(time.RFC3339),
+		Version:    opts.Version.String(),
+		BuildID:    opts.BuildID,
+		Image:      t.AppBuilder.AppImgPath(),
+		ImageHash:  fmt.Sprintf("%x", opts.AppHash),
+		FlashAreas: opts.FlashAreas,
 	}
 
 	rm := NewRepoManager()

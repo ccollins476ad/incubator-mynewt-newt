@@ -43,19 +43,21 @@ type RawImage struct {
 }
 
 type RawImageOffsets struct {
+	Header    int
 	Body      int
 	Trailer   int
 	Tlvs      []int
 	TotalSize int
 }
 
-func (h *ImageHdr) Map() map[string]interface{} {
+func (h *ImageHdr) Map(offset int) map[string]interface{} {
 	return map[string]interface{}{
-		"Magic": h.Magic,
-		"HdrSz": h.HdrSz,
-		"ImgSz": h.ImgSz,
-		"Flags": h.Flags,
-		"Vers":  h.Vers.String(),
+		"Magic":  h.Magic,
+		"HdrSz":  h.HdrSz,
+		"ImgSz":  h.ImgSz,
+		"Flags":  h.Flags,
+		"Vers":   h.Vers.String(),
+		"offset": offset,
 	}
 }
 
@@ -89,7 +91,7 @@ func (img *RawImage) Map() (map[string]interface{}, error) {
 	}
 
 	m := map[string]interface{}{}
-	m["header"] = img.Header.Map()
+	m["header"] = img.Header.Map(offs.Header)
 	m["body"] = rawBodyMap(offs.Body)
 	m["trailer"] = img.Trailer.Map(offs.Trailer)
 
@@ -176,6 +178,8 @@ func (i *RawImage) Hash() ([]byte, error) {
 func (i *RawImage) WritePlusOffsets(w io.Writer) (RawImageOffsets, error) {
 	offs := RawImageOffsets{}
 	offset := 0
+
+	offs.Header = offset
 
 	err := binary.Write(w, binary.LittleEndian, &i.Header)
 	if err != nil {
