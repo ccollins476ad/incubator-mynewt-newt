@@ -193,7 +193,7 @@ func ProduceImages(opts ImageProdOpts) (ProducedImageSet, error) {
 	return pset, nil
 }
 
-func ProduceManifest(opts manifest.ManifestOpts) error {
+func ProduceManifest(opts manifest.ManifestCreateOpts) error {
 	m, err := manifest.CreateManifest(opts)
 	if err != nil {
 		return err
@@ -241,7 +241,7 @@ func ProduceAll(t *builder.TargetBuilder, ver image.ImageVersion,
 		return err
 	}
 
-	mopts := manifest.ManifestOpts{
+	mopts := manifest.ManifestCreateOpts{
 		TgtBldr:    t,
 		AppHash:    pset.App.Hash,
 		Version:    ver,

@@ -53,6 +53,11 @@ func readFlashAreas(manifestFilename string) ([]flash.FlashArea, error) {
 
 	areas := flash.SortFlashAreas(man.FlashAreas)
 
+	overlaps, conflicts := flash.DetectErrors(areas)
+	if len(overlaps) > 0 || len(conflicts) > 0 {
+		return nil, util.NewNewtError(flash.ErrorText(overlaps, conflicts))
+	}
+
 	if err := mfg.VerifyAreas(areas, optDeviceNum); err != nil {
 		return nil, err
 	}
