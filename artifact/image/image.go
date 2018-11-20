@@ -21,94 +21,17 @@ package image
 
 import (
 	"bytes"
-	"crypto"
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/ecdsa"
-	"crypto/rand"
-	"crypto/rsa"
-	"crypto/sha256"
-	"crypto/x509"
-	"encoding/asn1"
-	"encoding/base64"
 	"encoding/binary"
-	"encoding/hex"
-	"encoding/pem"
+	"encoding/json"
 	"fmt"
-	"hash"
 	"io"
 	"io/ioutil"
-	"math/big"
+	"os"
 	"strconv"
 	"strings"
 
-	keywrap "github.com/NickBall/go-aes-key-wrap"
-
 	"mynewt.apache.org/newt/util"
 )
-
-// Set this to enable RSA-PSS for RSA signatures, instead of PKCS#1
-// v1.5.  Eventually, this should be the default.
-var UseRsaPss = false
-
-// Use old image format
-var UseV1 = false
-
-type ImageVersion struct {
-	Major    uint8
-	Minor    uint8
-	Rev      uint16
-	BuildNum uint32
-}
-
-type ImageKey struct {
-	// Only one of these members is non-nil.
-	Rsa *rsa.PrivateKey
-	Ec  *ecdsa.PrivateKey
-}
-
-type ImageHdr struct {
-	Magic uint32
-	Pad1  uint32
-	HdrSz uint16
-	Pad2  uint16
-	ImgSz uint32
-	Flags uint32
-	Vers  ImageVersion
-	Pad3  uint32
-}
-
-type ImageTlvInfo struct {
-	Magic     uint16
-	TlvTotLen uint16
-}
-
-type ImageTrailerTlv struct {
-	Type uint8
-	Pad  uint8
-	Len  uint16
-}
-
-type ImageCreator struct {
-	Body         []byte
-	Version      ImageVersion
-	SigKeys      []ImageKey
-	PlainSecret  []byte
-	CipherSecret []byte
-	HeaderSize   int
-	InitialHash  []byte
-	Bootable     bool
-
-	hash hash.Hash
-}
-
-type ImageGenerateOpts struct {
-	SrcBinFilename    string
-	SrcEncKeyFilename string
-	Version           ImageVersion
-	SigKeys           []ImageKey
-	LoaderHash        []byte
-}
 
 const (
 	IMAGE_MAGIC         = 0x96f3b83d /* Image header magic */
@@ -125,14 +48,6 @@ const (
  * Image header flags.
  */
 const (
-	IMAGEv1_F_PIC                      = 0x00000001
-	IMAGEv1_F_SHA256                   = 0x00000002 /* Image contains hash TLV */
-	IMAGEv1_F_PKCS15_RSA2048_SHA256    = 0x00000004 /* PKCS15 w/RSA2048 and SHA256 */
-	IMAGEv1_F_ECDSA224_SHA256          = 0x00000008 /* ECDSA224 over SHA256 */
-	IMAGEv1_F_NON_BOOTABLE             = 0x00000010 /* non bootable image */
-	IMAGEv1_F_ECDSA256_SHA256          = 0x00000020 /* ECDSA256 over SHA256 */
-	IMAGEv1_F_PKCS1_PSS_RSA2048_SHA256 = 0x00000040 /* RSA-PSS w/RSA2048 and SHA256 */
-
 	IMAGE_F_PIC          = 0x00000001
 	IMAGE_F_NON_BOOTABLE = 0x00000002 /* non bootable image */
 	IMAGE_F_ENCRYPTED    = 0x00000004 /* encrypted image */
@@ -142,11 +57,6 @@ const (
  * Image trailer TLV types.
  */
 const (
-	IMAGEv1_TLV_SHA256   = 1
-	IMAGEv1_TLV_RSA2048  = 2
-	IMAGEv1_TLV_ECDSA224 = 3
-	IMAGEv1_TLV_ECDSA256 = 4
-
 	IMAGE_TLV_KEYHASH  = 0x01
 	IMAGE_TLV_SHA256   = 0x10
 	IMAGE_TLV_RSA2048  = 0x20
@@ -166,9 +76,53 @@ var imageTlvTypeNameMap = map[uint8]string{
 	IMAGE_TLV_ENC_KEK:  "ENC_KEK",
 }
 
-type ECDSASig struct {
-	R *big.Int
-	S *big.Int
+type ImageVersion struct {
+	Major    uint8
+	Minor    uint8
+	Rev      uint16
+	BuildNum uint32
+}
+
+type ImageHdr struct {
+	Magic uint32
+	Pad1  uint32
+	HdrSz uint16
+	Pad2  uint16
+	ImgSz uint32
+	Flags uint32
+	Vers  ImageVersion
+	Pad3  uint32
+}
+
+type ImageTlvHdr struct {
+	Type uint8
+	Pad  uint8
+	Len  uint16
+}
+
+type ImageTlv struct {
+	Header ImageTlvHdr
+	Data   []byte
+}
+
+type ImageTrailer struct {
+	Magic     uint16
+	TlvTotLen uint16
+}
+
+type Image struct {
+	Header  ImageHdr
+	Body    []byte
+	Trailer ImageTrailer
+	Tlvs    []ImageTlv
+}
+
+type ImageOffsets struct {
+	Header    int
+	Body      int
+	Trailer   int
+	Tlvs      []int
+	TotalSize int
 }
 
 func ImageTlvTypeName(tlvType uint8) string {
@@ -224,730 +178,330 @@ func (ver ImageVersion) String() string {
 		ver.Major, ver.Minor, ver.Rev, ver.BuildNum)
 }
 
-func ParsePrivateKey(keyBytes []byte) (interface{}, error) {
-	var privKey interface{}
-	var err error
-
-	block, data := pem.Decode(keyBytes)
-	if block != nil && block.Type == "EC PARAMETERS" {
-		/*
-		 * Openssl prepends an EC PARAMETERS block before the
-		 * key itself.  If we see this first, just skip it,
-		 * and go on to the data block.
-		 */
-		block, _ = pem.Decode(data)
-	}
-	if block != nil && block.Type == "RSA PRIVATE KEY" {
-		/*
-		 * ParsePKCS1PrivateKey returns an RSA private key from its ASN.1
-		 * PKCS#1 DER encoded form.
-		 */
-		privKey, err = x509.ParsePKCS1PrivateKey(block.Bytes)
-		if err != nil {
-			return nil, util.FmtNewtError(
-				"Private key parsing failed: %s", err)
-		}
-	}
-	if block != nil && block.Type == "EC PRIVATE KEY" {
-		/*
-		 * ParseECPrivateKey returns a EC private key
-		 */
-		privKey, err = x509.ParseECPrivateKey(block.Bytes)
-		if err != nil {
-			return nil, util.FmtNewtError(
-				"Private key parsing failed: %s", err)
-		}
-	}
-	if block != nil && block.Type == "PRIVATE KEY" {
-		// This indicates a PKCS#8 unencrypted private key.
-		// The particular type of key will be indicated within
-		// the key itself.
-		privKey, err = x509.ParsePKCS8PrivateKey(block.Bytes)
-		if err != nil {
-			return nil, util.FmtNewtError(
-				"Private key parsing failed: %s", err)
-		}
-	}
-	if block != nil && block.Type == "ENCRYPTED PRIVATE KEY" {
-		// This indicates a PKCS#8 key wrapped with PKCS#5
-		// encryption.
-		privKey, err = parseEncryptedPrivateKey(block.Bytes)
-		if err != nil {
-			return nil, util.FmtNewtError("Unable to decode encrypted private key: %s", err)
-		}
-	}
-	if privKey == nil {
-		return nil, util.NewNewtError("Unknown private key format, EC/RSA private " +
-			"key in PEM format only.")
-	}
-
-	return privKey, nil
-}
-
-func ReadKey(filename string) (ImageKey, error) {
-	key := ImageKey{}
-
-	keyBytes, err := ioutil.ReadFile(filename)
-	if err != nil {
-		return key, util.FmtNewtError("Error reading key file: %s", err)
-	}
-
-	privKey, err := ParsePrivateKey(keyBytes)
-	if err != nil {
-		return key, err
-	}
-
-	switch priv := privKey.(type) {
-	case *rsa.PrivateKey:
-		key.Rsa = priv
-	case *ecdsa.PrivateKey:
-		key.Ec = priv
-	default:
-		return key, util.NewNewtError("Unknown private key format")
-	}
-
-	return key, nil
-}
-
-func ReadKeys(filenames []string) ([]ImageKey, error) {
-	keys := make([]ImageKey, len(filenames))
-
-	for i, filename := range filenames {
-		key, err := ReadKey(filename)
-		if err != nil {
-			return nil, err
-		}
-
-		keys[i] = key
-	}
-
-	return keys, nil
-}
-
-func (key *ImageKey) assertValid() {
-	if key.Rsa == nil && key.Ec == nil {
-		panic("invalid key; neither RSA nor ECC")
-	}
-
-	if key.Rsa != nil && key.Ec != nil {
-		panic("invalid key; neither RSA nor ECC")
+func (h *ImageHdr) Map(offset int) map[string]interface{} {
+	return map[string]interface{}{
+		"Magic":  h.Magic,
+		"HdrSz":  h.HdrSz,
+		"ImgSz":  h.ImgSz,
+		"Flags":  h.Flags,
+		"Vers":   h.Vers.String(),
+		"offset": offset,
 	}
 }
 
-func (key *ImageKey) sigKeyHash() ([]uint8, error) {
-	key.assertValid()
-
-	if key.Rsa != nil {
-		pubkey, _ := asn1.Marshal(key.Rsa.PublicKey)
-		sum := sha256.Sum256(pubkey)
-		return sum[:4], nil
-	} else {
-		switch key.Ec.Curve.Params().Name {
-		case "P-224":
-			fallthrough
-		case "P-256":
-			pubkey, _ := x509.MarshalPKIXPublicKey(&key.Ec.PublicKey)
-			sum := sha256.Sum256(pubkey)
-			return sum[:4], nil
-		default:
-			return nil, util.NewNewtError("Unsupported ECC curve")
-		}
+func rawBodyMap(offset int) map[string]interface{} {
+	return map[string]interface{}{
+		"offset": offset,
 	}
 }
 
-func (key *ImageKey) sigLen() uint16 {
-	key.assertValid()
-
-	if key.Rsa != nil {
-		return 256
-	} else {
-		switch key.Ec.Curve.Params().Name {
-		case "P-224":
-			return 68
-		case "P-256":
-			return 72
-		default:
-			return 0
-		}
+func (t *ImageTrailer) Map(offset int) map[string]interface{} {
+	return map[string]interface{}{
+		"Magic":     t.Magic,
+		"TlvTotLen": t.TlvTotLen,
+		"offset":    offset,
 	}
 }
 
-func (key *ImageKey) sigTlvType() uint8 {
-	key.assertValid()
-
-	if UseV1 {
-		if key.Rsa != nil {
-			return IMAGEv1_TLV_RSA2048
-		} else {
-			switch key.Ec.Curve.Params().Name {
-			case "P-224":
-				return IMAGEv1_TLV_ECDSA224
-			case "P-256":
-				return IMAGEv1_TLV_ECDSA256
-			default:
-				return 0
-			}
-		}
-	} else {
-		if key.Rsa != nil {
-			return IMAGE_TLV_RSA2048
-		} else {
-			switch key.Ec.Curve.Params().Name {
-			case "P-224":
-				return IMAGE_TLV_ECDSA224
-			case "P-256":
-				return IMAGE_TLV_ECDSA256
-			default:
-				return 0
-			}
-		}
+func (t *ImageTlv) Map(offset int) map[string]interface{} {
+	return map[string]interface{}{
+		"Type":    t.Header.Type,
+		"typestr": ImageTlvTypeName(t.Header.Type),
+		"Len":     t.Header.Len,
+		"offset":  offset,
 	}
 }
 
-/*
-func (image *Image) ReSign() error {
-	srcImg, err := os.Open(image.SourceImg)
-	if err != nil {
-		return util.FmtNewtError("Can't open image file %s: %s",
-			image.SourceImg, err.Error())
-	}
-
-	srcInfo, err := srcImg.Stat()
-	if err != nil {
-		return util.FmtNewtError("Can't stat image file %s: %s",
-			image.SourceImg, err.Error())
-	}
-
-	var hdr1 ImageHdrV1
-	var hdr2 ImageHdr
-	var hdrSz uint16
-	var imgSz uint32
-
-	err = binary.Read(srcImg, binary.LittleEndian, &hdr1)
-	if err == nil {
-		srcImg.Seek(0, 0)
-		err = binary.Read(srcImg, binary.LittleEndian, &hdr2)
-	}
-	if err != nil {
-		return util.FmtNewtError("Failing to access image %s: %s",
-			image.SourceImg, err.Error())
-	}
-	if hdr1.Magic == IMAGEv1_MAGIC {
-		if uint32(srcInfo.Size()) !=
-			uint32(hdr1.HdrSz)+hdr1.ImgSz+uint32(hdr1.TlvSz) {
-
-			return util.FmtNewtError("File %s is not an image\n",
-				image.SourceImg)
-		}
-		imgSz = hdr1.ImgSz
-		hdrSz = hdr1.HdrSz
-		image.Version = hdr1.Vers
-
-		log.Debugf("Resigning %s (ver %d.%d.%d.%d)", image.SourceImg,
-			hdr1.Vers.Major, hdr1.Vers.Minor, hdr1.Vers.Rev,
-			hdr1.Vers.BuildNum)
-	} else if hdr2.Magic == IMAGE_MAGIC {
-		if uint32(srcInfo.Size()) < uint32(hdr2.HdrSz)+hdr2.ImgSz {
-			return util.FmtNewtError("File %s is not an image\n",
-				image.SourceImg)
-		}
-		imgSz = hdr2.ImgSz
-		hdrSz = hdr2.HdrSz
-		image.Version = hdr2.Vers
-
-		log.Debugf("Resigning %s (ver %d.%d.%d.%d)", image.SourceImg,
-			hdr2.Vers.Major, hdr2.Vers.Minor, hdr2.Vers.Rev,
-			hdr2.Vers.BuildNum)
-	} else {
-		return util.FmtNewtError("File %s is not an image\n",
-			image.SourceImg)
-	}
-	srcImg.Seek(int64(hdrSz), 0)
-
-	tmpBin, err := ioutil.TempFile("", "")
-	if err != nil {
-		return util.FmtNewtError("Creating temp file failed: %s",
-			err.Error())
-	}
-	tmpBinName := tmpBin.Name()
-	defer os.Remove(tmpBinName)
-
-	log.Debugf("Extracting data from %s:%d-%d to %s\n",
-		image.SourceImg, int64(hdrSz), int64(hdrSz)+int64(imgSz), tmpBinName)
-	_, err = io.CopyN(tmpBin, srcImg, int64(imgSz))
-	srcImg.Close()
-	tmpBin.Close()
-	if err != nil {
-		return util.FmtNewtError("Cannot copy to tmpfile %s: %s",
-			tmpBin.Name(), err.Error())
-	}
-
-	image.SourceBin = tmpBinName
-	image.TargetImg = image.SourceImg
-	image.HeaderSize = int(hdrSz)
-
-	//return image.Generate(nil)
-	return nil
-}
-*/
-
-func generateEncTlv(cipherSecret []byte) (RawImageTlv, error) {
-	var encType uint8
-
-	if len(cipherSecret) == 256 {
-		encType = IMAGE_TLV_ENC_RSA
-	} else if len(cipherSecret) == 24 {
-		encType = IMAGE_TLV_ENC_KEK
-	} else {
-		return RawImageTlv{}, util.FmtNewtError("Invalid enc TLV size ")
-	}
-
-	return RawImageTlv{
-		Header: ImageTrailerTlv{
-			Type: encType,
-			Pad:  0,
-			Len:  uint16(len(cipherSecret)),
-		},
-		Data: cipherSecret,
-	}, nil
-}
-
-func generateSigRsa(key *rsa.PrivateKey, hash []byte) ([]byte, error) {
-	var signature []byte
-	var err error
-
-	if UseRsaPss || !UseV1 {
-		opts := rsa.PSSOptions{
-			SaltLength: rsa.PSSSaltLengthEqualsHash,
-		}
-		signature, err = rsa.SignPSS(
-			rand.Reader, key, crypto.SHA256, hash, &opts)
-	} else {
-		signature, err = rsa.SignPKCS1v15(
-			rand.Reader, key, crypto.SHA256, hash)
-	}
-	if err != nil {
-		return nil, util.FmtNewtError("Failed to compute signature: %s", err)
-	}
-
-	return signature, nil
-}
-
-func generateSigEc(key *ecdsa.PrivateKey, hash []byte) ([]byte, error) {
-	r, s, err := ecdsa.Sign(rand.Reader, key, hash)
-	if err != nil {
-		return nil, util.FmtNewtError("Failed to compute signature: %s", err)
-	}
-
-	ECDSA := ECDSASig{
-		R: r,
-		S: s,
-	}
-
-	signature, err := asn1.Marshal(ECDSA)
-	if err != nil {
-		return nil, util.FmtNewtError("Failed to construct signature: %s", err)
-	}
-
-	return signature, nil
-}
-
-func generateSigTlvRsa(key ImageKey, hash []byte) (RawImageTlv, error) {
-	sig, err := generateSigRsa(key.Rsa, hash)
-	if err != nil {
-		return RawImageTlv{}, err
-	}
-
-	return RawImageTlv{
-		Header: ImageTrailerTlv{
-			Type: key.sigTlvType(),
-			Pad:  0,
-			Len:  256, /* 2048 bits */
-		},
-		Data: sig,
-	}, nil
-}
-
-func generateSigTlvEc(key ImageKey, hash []byte) (RawImageTlv, error) {
-	sig, err := generateSigEc(key.Ec, hash)
-	if err != nil {
-		return RawImageTlv{}, err
-	}
-
-	sigLen := key.sigLen()
-	if len(sig) > int(sigLen) {
-		return RawImageTlv{}, util.FmtNewtError("Something is really wrong\n")
-	}
-
-	b := &bytes.Buffer{}
-
-	if _, err := b.Write(sig); err != nil {
-		return RawImageTlv{},
-			util.FmtNewtError("Failed to append sig: %s", err.Error())
-	}
-
-	pad := make([]byte, int(sigLen)-len(sig))
-	if _, err := b.Write(pad); err != nil {
-		return RawImageTlv{}, util.FmtNewtError(
-			"Failed to serialize image trailer: %s", err.Error())
-	}
-
-	return RawImageTlv{
-		Header: ImageTrailerTlv{
-			Type: key.sigTlvType(),
-			Pad:  0,
-			Len:  sigLen + uint16(len(pad)),
-		},
-		Data: b.Bytes(),
-	}, nil
-}
-
-func generateSigTlv(key ImageKey, hash []byte) (RawImageTlv, error) {
-	key.assertValid()
-
-	if key.Rsa != nil {
-		return generateSigTlvRsa(key, hash)
-	} else {
-		return generateSigTlvEc(key, hash)
-	}
-}
-
-func generateKeyHashTlv(key ImageKey) (RawImageTlv, error) {
-	key.assertValid()
-
-	keyHash, err := key.sigKeyHash()
-	if err != nil {
-		return RawImageTlv{}, util.FmtNewtError(
-			"Failed to compute hash of the public key: %s", err.Error())
-	}
-
-	return RawImageTlv{
-		Header: ImageTrailerTlv{
-			Type: IMAGE_TLV_KEYHASH,
-			Pad:  0,
-			Len:  uint16(len(keyHash)),
-		},
-		Data: keyHash,
-	}, nil
-}
-
-func GenerateSigTlvs(keys []ImageKey, hash []byte) ([]RawImageTlv, error) {
-	var tlvs []RawImageTlv
-
-	for _, key := range keys {
-		key.assertValid()
-
-		tlv, err := generateKeyHashTlv(key)
-		if err != nil {
-			return nil, err
-		}
-		tlvs = append(tlvs, tlv)
-
-		tlv, err = generateSigTlv(key, hash)
-		if err != nil {
-			return nil, err
-		}
-		tlvs = append(tlvs, tlv)
-	}
-
-	return tlvs, nil
-}
-
-func GenerateImage(opts ImageGenerateOpts) (RawImage, error) {
-	ic := NewImageCreator()
-
-	srcBin, err := ioutil.ReadFile(opts.SrcBinFilename)
-	if err != nil {
-		return RawImage{}, util.FmtNewtError(
-			"Can't read app binary: %s", err.Error())
-	}
-
-	ic.Body = srcBin
-	ic.Version = opts.Version
-	ic.SigKeys = opts.SigKeys
-
-	if opts.LoaderHash != nil {
-		ic.InitialHash = opts.LoaderHash
-		ic.Bootable = false
-	} else {
-		ic.Bootable = true
-	}
-
-	if opts.SrcEncKeyFilename != "" {
-		plainSecret := make([]byte, 16)
-		if _, err := rand.Read(plainSecret); err != nil {
-			return RawImage{}, util.FmtNewtError(
-				"Random generation error: %s\n", err)
-		}
-
-		cipherSecret, err := ReadEncKey(opts.SrcEncKeyFilename, plainSecret)
-		if err != nil {
-			return RawImage{}, err
-		}
-
-		ic.PlainSecret = plainSecret
-		ic.CipherSecret = cipherSecret
-	}
-
-	ri, err := ic.Create()
-	if err != nil {
-		return RawImage{}, err
-	}
-
-	return ri, nil
-}
-
-func parseEncKeyPem(keyBytes []byte, plainSecret []byte) ([]byte, error) {
-	b, _ := pem.Decode(keyBytes)
-	if b == nil {
-		return nil, nil
-	}
-
-	if b.Type != "PUBLIC KEY" && b.Type != "RSA PUBLIC KEY" {
-		return nil, util.NewNewtError("Invalid PEM file")
-	}
-
-	pub, err := x509.ParsePKIXPublicKey(b.Bytes)
-	if err != nil {
-		return nil, util.FmtNewtError(
-			"Error parsing pubkey file: %s", err.Error())
-	}
-
-	var pubk *rsa.PublicKey
-	switch pub.(type) {
-	case *rsa.PublicKey:
-		pubk = pub.(*rsa.PublicKey)
-	default:
-		return nil, util.FmtNewtError(
-			"Error parsing pubkey file: %s", err.Error())
-	}
-
-	rng := rand.Reader
-	cipherSecret, err := rsa.EncryptOAEP(
-		sha256.New(), rng, pubk, plainSecret, nil)
-	if err != nil {
-		return nil, util.FmtNewtError(
-			"Error from encryption: %s\n", err.Error())
-	}
-
-	return cipherSecret, nil
-}
-
-func parseEncKeyBase64(keyBytes []byte, plainSecret []byte) ([]byte, error) {
-	kek, err := base64.StdEncoding.DecodeString(string(keyBytes))
-	if err != nil {
-		return nil, util.FmtNewtError(
-			"Error decoding kek: %s", err.Error())
-	}
-	if len(kek) != 16 {
-		return nil, util.FmtNewtError(
-			"Unexpected key size: %d != 16", len(kek))
-	}
-
-	cipher, err := aes.NewCipher(kek)
-	if err != nil {
-		return nil, util.FmtNewtError(
-			"Error creating keywrap cipher: %s", err.Error())
-	}
-
-	cipherSecret, err := keywrap.Wrap(cipher, plainSecret)
-	if err != nil {
-		return nil, util.FmtNewtError("Error key-wrapping: %s", err.Error())
-	}
-
-	return cipherSecret, nil
-}
-
-func ReadEncKey(filename string, plainSecret []byte) ([]byte, error) {
-	keyBytes, err := ioutil.ReadFile(filename)
-	if err != nil {
-		return nil, util.FmtNewtError(
-			"Error reading pubkey file: %s", err.Error())
-	}
-
-	// Try reading as PEM (asymetric key).
-	cipherSecret, err := parseEncKeyPem(keyBytes, plainSecret)
-	if err != nil {
-		return nil, err
-	}
-	if cipherSecret != nil {
-		return cipherSecret, nil
-	}
-
-	// Not PEM; assume this is a base64 encoded symetric key
-	cipherSecret, err = parseEncKeyBase64(keyBytes, plainSecret)
+func (img *Image) Map() (map[string]interface{}, error) {
+	offs, err := img.Offsets()
 	if err != nil {
 		return nil, err
 	}
 
-	return cipherSecret, nil
-}
+	m := map[string]interface{}{}
+	m["header"] = img.Header.Map(offs.Header)
+	m["body"] = rawBodyMap(offs.Body)
+	m["trailer"] = img.Trailer.Map(offs.Trailer)
 
-func NewImageCreator() ImageCreator {
-	return ImageCreator{
-		HeaderSize: IMAGE_HEADER_SIZE,
-		Bootable:   true,
-		hash:       sha256.New(),
+	tlvMaps := []map[string]interface{}{}
+	for i, tlv := range img.Tlvs {
+		tlvMaps = append(tlvMaps, tlv.Map(offs.Tlvs[i]))
 	}
+	m["tlvs"] = tlvMaps
+
+	return m, nil
 }
 
-func (ic *ImageCreator) addToHash(itf interface{}) error {
-	if err := binary.Write(ic.hash, binary.LittleEndian,
-		itf); err != nil {
+func (img *Image) Json() (string, error) {
+	m, err := img.Map()
+	if err != nil {
+		return "", err
+	}
 
-		return util.FmtNewtError("Failed to hash data: %s", err.Error())
+	b, err := json.MarshalIndent(m, "", "    ")
+	if err != nil {
+		return "", util.ChildNewtError(err)
+	}
+
+	return string(b), nil
+}
+
+func (tlv *ImageTlv) Write(w io.Writer) (int, error) {
+	totalSize := 0
+
+	err := binary.Write(w, binary.LittleEndian, &tlv.Header)
+	if err != nil {
+		return totalSize, util.ChildNewtError(err)
+	}
+	totalSize += IMAGE_TLV_SIZE
+
+	size, err := w.Write(tlv.Data)
+	if err != nil {
+		return totalSize, util.ChildNewtError(err)
+	}
+	totalSize += size
+
+	return totalSize, nil
+}
+
+func (i *Image) FindTlvs(tlvType uint8) []ImageTlv {
+	var tlvs []ImageTlv
+
+	for _, tlv := range i.Tlvs {
+		if tlv.Header.Type == tlvType {
+			tlvs = append(tlvs, tlv)
+		}
+	}
+
+	return tlvs
+}
+
+func (i *Image) RemoveTlvsIf(pred func(tlv ImageTlv) bool) int {
+	numRmed := 0
+	for idx := 0; idx < len(i.Tlvs); {
+		tlv := i.Tlvs[idx]
+		if pred(tlv) {
+			i.Tlvs = append(i.Tlvs[:idx], i.Tlvs[idx+1:]...)
+			numRmed++
+		} else {
+			idx++
+		}
+	}
+
+	return numRmed
+}
+
+func (i *Image) Hash() ([]byte, error) {
+	tlvs := i.FindTlvs(IMAGE_TLV_SHA256)
+	if len(tlvs) == 0 {
+		return nil, util.FmtNewtError("Image does not contain hash TLV")
+	}
+	if len(tlvs) > 1 {
+		return nil, util.FmtNewtError("Image contains %d hash TLVs", len(tlvs))
+	}
+
+	return tlvs[0].Data, nil
+}
+
+func (i *Image) WritePlusOffsets(w io.Writer) (ImageOffsets, error) {
+	offs := ImageOffsets{}
+	offset := 0
+
+	offs.Header = offset
+
+	err := binary.Write(w, binary.LittleEndian, &i.Header)
+	if err != nil {
+		return offs, util.ChildNewtError(err)
+	}
+	offset += IMAGE_HEADER_SIZE
+
+	offs.Body = offset
+	size, err := w.Write(i.Body)
+	if err != nil {
+		return offs, util.ChildNewtError(err)
+	}
+	offset += size
+
+	offs.Trailer = offset
+	err = binary.Write(w, binary.LittleEndian, &i.Trailer)
+	if err != nil {
+		return offs, util.ChildNewtError(err)
+	}
+	offset += IMAGE_TRAILER_SIZE
+
+	for _, tlv := range i.Tlvs {
+		offs.Tlvs = append(offs.Tlvs, offset)
+		size, err := tlv.Write(w)
+		if err != nil {
+			return offs, util.ChildNewtError(err)
+		}
+		offset += size
+	}
+
+	offs.TotalSize = offset
+
+	return offs, nil
+}
+
+func (i *Image) Offsets() (ImageOffsets, error) {
+	return i.WritePlusOffsets(ioutil.Discard)
+}
+
+func (i *Image) TotalSize() (int, error) {
+	offs, err := i.Offsets()
+	if err != nil {
+		return 0, err
+	}
+	return offs.TotalSize, nil
+}
+
+func (i *Image) Write(w io.Writer) (int, error) {
+	offs, err := i.WritePlusOffsets(w)
+	if err != nil {
+		return 0, err
+	}
+
+	return offs.TotalSize, nil
+}
+
+func (i *Image) WriteToFile(filename string) error {
+	f, err := os.OpenFile(filename, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0666)
+	if err != nil {
+		return util.ChildNewtError(err)
+	}
+
+	if _, err := i.Write(f); err != nil {
+		return util.ChildNewtError(err)
 	}
 
 	return nil
 }
 
-func (ic *ImageCreator) Create() (RawImage, error) {
-	ri := RawImage{}
+func parseRawHeader(imgData []byte, offset int) (ImageHdr, int, error) {
+	var hdr ImageHdr
 
-	if ic.InitialHash != nil {
-		if err := ic.addToHash(ic.InitialHash); err != nil {
-			return ri, err
-		}
+	r := bytes.NewReader(imgData)
+	r.Seek(int64(offset), io.SeekStart)
+
+	if err := binary.Read(r, binary.LittleEndian, &hdr); err != nil {
+		return hdr, 0, util.FmtNewtError(
+			"Error reading image header: %s", err.Error())
 	}
 
-	/*
-	 * First the header
-	 */
-	hdr := ImageHdr{
-		Magic: IMAGE_MAGIC,
-		Pad1:  0,
-		HdrSz: IMAGE_HEADER_SIZE,
-		Pad2:  0,
-		ImgSz: uint32(len(ic.Body)),
-		Flags: 0,
-		Vers:  ic.Version,
-		Pad3:  0,
+	if hdr.Magic != IMAGE_MAGIC {
+		return hdr, 0, util.FmtNewtError(
+			"Image magic incorrect; expected 0x%08x, got 0x%08x",
+			IMAGE_MAGIC, hdr.Magic)
 	}
 
-	if !ic.Bootable {
-		hdr.Flags |= IMAGE_F_NON_BOOTABLE
+	remLen := len(imgData) - offset
+	if remLen < int(hdr.HdrSz) {
+		return hdr, 0, util.FmtNewtError(
+			"Image header incomplete; expected %d bytes, got %d bytes",
+			hdr.HdrSz, remLen)
 	}
 
-	if ic.CipherSecret != nil {
-		hdr.Flags |= IMAGE_F_ENCRYPTED
+	return hdr, int(hdr.HdrSz), nil
+}
+
+func parseRawBody(imgData []byte, hdr ImageHdr,
+	offset int) ([]byte, int, error) {
+
+	imgSz := int(hdr.ImgSz)
+	remLen := len(imgData) - offset
+
+	if remLen < imgSz {
+		return nil, 0, util.FmtNewtError(
+			"Image body incomplete; expected %d bytes, got %d bytes",
+			imgSz, remLen)
 	}
 
-	if ic.HeaderSize != 0 {
-		/*
-		 * Pad the header out to the given size.  There will
-		 * just be zeros between the header and the start of
-		 * the image when it is padded.
-		 */
-		if ic.HeaderSize < IMAGE_HEADER_SIZE {
-			return ri, util.FmtNewtError("Image header must be at "+
-				"least %d bytes", IMAGE_HEADER_SIZE)
-		}
+	return imgData[offset : offset+imgSz], imgSz, nil
+}
 
-		hdr.HdrSz = uint16(ic.HeaderSize)
+func parseRawTrailer(imgData []byte, offset int) (ImageTrailer, int, error) {
+	var trailer ImageTrailer
+
+	r := bytes.NewReader(imgData)
+	r.Seek(int64(offset), io.SeekStart)
+
+	if err := binary.Read(r, binary.LittleEndian, &trailer); err != nil {
+		return trailer, 0, util.FmtNewtError(
+			"Image contains invalid trailer at offset %d: %s",
+			offset, err.Error())
 	}
 
-	if err := ic.addToHash(hdr); err != nil {
-		return ri, err
+	return trailer, IMAGE_TRAILER_SIZE, nil
+}
+
+func parseRawTlv(imgData []byte, offset int) (ImageTlv, int, error) {
+	tlv := ImageTlv{}
+
+	r := bytes.NewReader(imgData)
+	r.Seek(int64(offset), io.SeekStart)
+
+	if err := binary.Read(r, binary.LittleEndian, &tlv.Header); err != nil {
+		return tlv, 0, util.FmtNewtError(
+			"Image contains invalid TLV at offset %d: %s", offset, err.Error())
 	}
 
-	if hdr.HdrSz > IMAGE_HEADER_SIZE {
-		/*
-		 * Pad the image (and hash) with zero bytes to fill
-		 * out the buffer.
-		 */
-		buf := make([]byte, hdr.HdrSz-IMAGE_HEADER_SIZE)
-
-		if err := ic.addToHash(buf); err != nil {
-			return ri, err
-		}
+	tlv.Data = make([]byte, tlv.Header.Len)
+	if _, err := r.Read(tlv.Data); err != nil {
+		return tlv, 0, util.FmtNewtError(
+			"Image contains invalid TLV at offset %d: %s", offset, err.Error())
 	}
 
-	ri.Header = hdr
+	return tlv, IMAGE_TLV_SIZE + int(tlv.Header.Len), nil
+}
 
-	var stream cipher.Stream
-	if ic.CipherSecret != nil {
-		block, err := aes.NewCipher(ic.PlainSecret)
-		if err != nil {
-			return ri, util.NewNewtError("Failed to create block cipher")
-		}
-		nonce := []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
-		stream = cipher.NewCTR(block, nonce)
-	}
+func ParseImage(imgData []byte) (Image, error) {
+	img := Image{}
+	offset := 0
 
-	/*
-	 * Followed by data.
-	 */
-	dataBuf := make([]byte, 16)
-	encBuf := make([]byte, 16)
-	r := bytes.NewReader(ic.Body)
-	w := bytes.Buffer{}
-	for {
-		cnt, err := r.Read(dataBuf)
-		if err != nil && err != io.EOF {
-			return ri, util.FmtNewtError(
-				"Failed to read from image body: %s", err.Error())
-		}
-		if cnt == 0 {
-			break
-		}
-
-		if err := ic.addToHash(dataBuf[0:cnt]); err != nil {
-			return ri, err
-		}
-		if ic.CipherSecret == nil {
-			_, err = w.Write(dataBuf[0:cnt])
-		} else {
-			stream.XORKeyStream(encBuf, dataBuf[0:cnt])
-			_, err = w.Write(encBuf[0:cnt])
-		}
-		if err != nil {
-			return ri, util.FmtNewtError(
-				"Failed to write to image body: %s", err.Error())
-		}
-	}
-	ri.Body = w.Bytes()
-
-	hashBytes := ic.hash.Sum(nil)
-
-	util.StatusMessage(util.VERBOSITY_VERBOSE,
-		"Computed Hash for image as %s\n", hex.EncodeToString(hashBytes))
-
-	// Trailer.
-	ri.Trailer = ImageTlvInfo{
-		Magic: IMAGE_TRAILER_MAGIC,
-	}
-
-	// Hash TLV.
-	tlv := RawImageTlv{
-		Header: ImageTrailerTlv{
-			Type: IMAGE_TLV_SHA256,
-			Pad:  0,
-			Len:  uint16(len(hashBytes)),
-		},
-		Data: hashBytes,
-	}
-	ri.Tlvs = append(ri.Tlvs, tlv)
-
-	tlvs, err := GenerateSigTlvs(ic.SigKeys, hashBytes)
+	hdr, size, err := parseRawHeader(imgData, offset)
 	if err != nil {
-		return ri, err
+		return img, err
 	}
-	ri.Tlvs = append(ri.Tlvs, tlvs...)
+	offset += size
 
-	if ic.CipherSecret != nil {
-		tlv, err := generateEncTlv(ic.CipherSecret)
-		if err != nil {
-			return ri, err
-		}
-		ri.Tlvs = append(ri.Tlvs, tlv)
-	}
-
-	totalSize, err := ri.TotalSize()
+	body, size, err := parseRawBody(imgData, hdr, offset)
 	if err != nil {
-		return ri, err
+		return img, err
 	}
-	ri.Trailer.TlvTotLen =
-		uint16(totalSize - int(ri.Header.HdrSz) - len(ri.Body))
+	offset += size
 
-	return ri, nil
+	trailer, size, err := parseRawTrailer(imgData, offset)
+	if err != nil {
+		return img, err
+	}
+	offset += size
+
+	var tlvs []ImageTlv
+	for offset < len(imgData) {
+		tlv, size, err := parseRawTlv(imgData, offset)
+		if err != nil {
+			return img, err
+		}
+
+		tlvs = append(tlvs, tlv)
+		offset += size
+	}
+
+	img.Header = hdr
+	img.Body = body
+	img.Trailer = trailer
+	img.Tlvs = tlvs
+
+	return img, nil
+}
+
+func ReadImage(filename string) (Image, error) {
+	ri := Image{}
+
+	imgData, err := ioutil.ReadFile(filename)
+	if err != nil {
+		return ri, util.ChildNewtError(err)
+	}
+
+	return ParseImage(imgData)
 }

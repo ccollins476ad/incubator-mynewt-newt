@@ -12,30 +12,20 @@ import (
 	"mynewt.apache.org/newt/util"
 )
 
-type ImageProdOpts struct {
-	LoaderSrcFilename string
-	LoaderDstFilename string
-	AppSrcFilename    string
-	AppDstFilename    string
-	EncKeyFilename    string
-	Version           image.ImageVersion
-	SigKeys           []image.ImageSigKey
-}
-
-type ProducedImage struct {
+type ProducedImageV1 struct {
 	Filename string
-	Image    image.Image
+	Image    image.ImageV1
 	Hash     []byte
 	FileSize int
 }
 
-type ProducedImageSet struct {
-	Loader *ProducedImage
-	App    ProducedImage
+type ProducedImageSetV1 struct {
+	Loader *ProducedImageV1
+	App    ProducedImageV1
 }
 
-func produceLoader(opts ImageProdOpts) (ProducedImage, error) {
-	pi := ProducedImage{}
+func produceLoaderV1(opts ImageProdOpts) (ProducedImageV1, error) {
+	pi := ProducedImageV1{}
 
 	igo := image.ImageCreateOpts{
 		SrcBinFilename:    opts.LoaderSrcFilename,
@@ -44,17 +34,17 @@ func produceLoader(opts ImageProdOpts) (ProducedImage, error) {
 		SigKeys:           opts.SigKeys,
 	}
 
-	ri, err := image.GenerateImage(igo)
+	img, err := image.GenerateV1Image(igo)
 	if err != nil {
 		return pi, err
 	}
 
-	hash, err := ri.Hash()
+	hash, err := img.Hash()
 	if err != nil {
 		return pi, err
 	}
 
-	fileSize, err := ri.TotalSize()
+	fileSize, err := img.TotalSize()
 	if err != nil {
 		return pi, err
 	}
@@ -68,23 +58,25 @@ func produceLoader(opts ImageProdOpts) (ProducedImage, error) {
 	}
 	defer imgFile.Close()
 
-	if _, err := ri.Write(imgFile); err != nil {
+	if _, err := img.Write(imgFile); err != nil {
 		return pi, err
 	}
 
 	util.StatusMessage(util.VERBOSITY_DEFAULT,
-		"Loader image successfully generated: %s\n", opts.LoaderDstFilename)
+		"V1 loader image successfully generated: %s\n", opts.LoaderDstFilename)
 
 	pi.Filename = opts.LoaderDstFilename
-	pi.Image = ri
+	pi.Image = img
 	pi.Hash = hash
 	pi.FileSize = fileSize
 
 	return pi, nil
 }
 
-func produceApp(opts ImageProdOpts, loaderHash []byte) (ProducedImage, error) {
-	pi := ProducedImage{}
+func produceAppV1(opts ImageProdOpts,
+	loaderHash []byte) (ProducedImageV1, error) {
+
+	pi := ProducedImageV1{}
 
 	igo := image.ImageCreateOpts{
 		SrcBinFilename:    opts.AppSrcFilename,
@@ -94,17 +86,17 @@ func produceApp(opts ImageProdOpts, loaderHash []byte) (ProducedImage, error) {
 		LoaderHash:        loaderHash,
 	}
 
-	ri, err := image.GenerateImage(igo)
+	img, err := image.GenerateV1Image(igo)
 	if err != nil {
 		return pi, err
 	}
 
-	hash, err := ri.Hash()
+	hash, err := img.Hash()
 	if err != nil {
 		return pi, err
 	}
 
-	fileSize, err := ri.TotalSize()
+	fileSize, err := img.TotalSize()
 	if err != nil {
 		return pi, err
 	}
@@ -117,7 +109,7 @@ func produceApp(opts ImageProdOpts, loaderHash []byte) (ProducedImage, error) {
 	}
 	defer imgFile.Close()
 
-	if _, err := ri.Write(imgFile); err != nil {
+	if _, err := img.Write(imgFile); err != nil {
 		return pi, err
 	}
 
@@ -125,7 +117,7 @@ func produceApp(opts ImageProdOpts, loaderHash []byte) (ProducedImage, error) {
 		"App image successfully generated: %s\n", opts.AppDstFilename)
 
 	pi.Filename = opts.AppDstFilename
-	pi.Image = ri
+	pi.Image = img
 	pi.Hash = hash
 	pi.FileSize = fileSize
 
@@ -134,7 +126,7 @@ func produceApp(opts ImageProdOpts, loaderHash []byte) (ProducedImage, error) {
 
 // Verifies that each already-built image leaves enough room for a boot trailer
 // a the end of its slot.
-func verifyImgSizes(pset ProducedImageSet, maxSizes []int) error {
+func verifyImgSizesV1(pset ProducedImageSetV1, maxSizes []int) error {
 	errLines := []string{}
 	slot := 0
 
@@ -170,12 +162,12 @@ func verifyImgSizes(pset ProducedImageSet, maxSizes []int) error {
 	return nil
 }
 
-func ProduceImages(opts ImageProdOpts) (ProducedImageSet, error) {
-	pset := ProducedImageSet{}
+func ProduceImagesV1(opts ImageProdOpts) (ProducedImageSetV1, error) {
+	pset := ProducedImageSetV1{}
 
 	var loaderHash []byte
 	if opts.LoaderSrcFilename != "" {
-		pi, err := produceLoader(opts)
+		pi, err := produceLoaderV1(opts)
 		if err != nil {
 			return pset, err
 		}
@@ -184,7 +176,7 @@ func ProduceImages(opts ImageProdOpts) (ProducedImageSet, error) {
 		pset.Loader = &pi
 	}
 
-	pi, err := produceApp(opts, loaderHash)
+	pi, err := produceAppV1(opts, loaderHash)
 	if err != nil {
 		return pset, err
 	}
@@ -193,50 +185,11 @@ func ProduceImages(opts ImageProdOpts) (ProducedImageSet, error) {
 	return pset, nil
 }
 
-func ProduceManifest(opts manifest.ManifestCreateOpts) error {
-	m, err := manifest.CreateManifest(opts)
-	if err != nil {
-		return err
-	}
-
-	file, err := os.Create(opts.TgtBldr.AppBuilder.ManifestPath())
-	if err != nil {
-		return util.FmtNewtError("Cannot create manifest file %s: %s",
-			opts.TgtBldr.AppBuilder.ManifestPath(), err.Error())
-	}
-	defer file.Close()
-
-	if _, err := m.Write(file); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func OptsFromTgtBldr(b *builder.TargetBuilder, ver image.ImageVersion,
-	sigKeys []image.ImageSigKey, encKeyFilename string) ImageProdOpts {
-
-	opts := ImageProdOpts{
-		AppSrcFilename: b.AppBuilder.AppBinPath(),
-		AppDstFilename: b.AppBuilder.AppImgPath(),
-		EncKeyFilename: encKeyFilename,
-		Version:        ver,
-		SigKeys:        sigKeys,
-	}
-
-	if b.LoaderBuilder != nil {
-		opts.LoaderSrcFilename = b.LoaderBuilder.AppBinPath()
-		opts.LoaderDstFilename = b.LoaderBuilder.AppImgPath()
-	}
-
-	return opts
-}
-
-func ProduceAll(t *builder.TargetBuilder, ver image.ImageVersion,
+func ProduceAllV1(t *builder.TargetBuilder, ver image.ImageVersion,
 	sigKeys []image.ImageSigKey, encKeyFilename string) error {
 
 	popts := OptsFromTgtBldr(t, ver, sigKeys, encKeyFilename)
-	pset, err := ProduceImages(popts)
+	pset, err := ProduceImagesV1(popts)
 	if err != nil {
 		return err
 	}
@@ -257,7 +210,7 @@ func ProduceAll(t *builder.TargetBuilder, ver image.ImageVersion,
 		return err
 	}
 
-	if err := verifyImgSizes(pset, mopts.TgtBldr.MaxImgSizes()); err != nil {
+	if err := verifyImgSizesV1(pset, mopts.TgtBldr.MaxImgSizes()); err != nil {
 		return err
 	}
 

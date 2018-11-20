@@ -29,8 +29,8 @@ import (
 	"mynewt.apache.org/newt/util"
 )
 
-func readImage(filename string) (image.RawImage, error) {
-	img, err := image.ReadRawImage(filename)
+func readImage(filename string) (image.Image, error) {
+	img, err := image.ReadImage(filename)
 	if err != nil {
 		return img, err
 	}
@@ -39,7 +39,7 @@ func readImage(filename string) (image.RawImage, error) {
 	return img, nil
 }
 
-func writeImage(img image.RawImage, filename string) error {
+func writeImage(img image.Image, filename string) error {
 	if err := img.WriteToFile(filename); err != nil {
 		return err
 	}
@@ -120,7 +120,7 @@ func runRmsigsCmd(cmd *cobra.Command, args []string) {
 		MimgUsage(cmd, err)
 	}
 
-	cnt := img.RemoveTlvsIf(func(tlv image.RawImageTlv) bool {
+	cnt := img.RemoveTlvsIf(func(tlv image.ImageTlv) bool {
 		return tlv.Header.Type == image.IMAGE_TLV_KEYHASH ||
 			tlv.Header.Type == image.IMAGE_TLV_RSA2048 ||
 			tlv.Header.Type == image.IMAGE_TLV_ECDSA224 ||

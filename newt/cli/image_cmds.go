@@ -37,7 +37,7 @@ var retain bool
 var encKeyFilename string
 
 // @return                      keys, key ID, error
-func parseKeyArgs(args []string) ([]image.ImageKey, uint8, error) {
+func parseKeyArgs(args []string) ([]image.ImageSigKey, uint8, error) {
 	if len(args) == 0 {
 		return nil, 0, nil
 	}
@@ -47,7 +47,7 @@ func parseKeyArgs(args []string) ([]image.ImageKey, uint8, error) {
 
 	if len(args) == 1 {
 		keyFilenames = append(keyFilenames, args[0])
-	} else if image.UseV1 {
+	} else if useV1 {
 		keyIdUint, err := strconv.ParseUint(args[1], 10, 8)
 		if err != nil {
 			return nil, 0, util.NewNewtError("Key ID must be between 0-255")
@@ -74,11 +74,6 @@ func createImageRunCmd(cmd *cobra.Command, args []string) {
 
 	if useV1 && useV2 {
 		NewtUsage(cmd, util.NewNewtError("Either -1, or -2, but not both"))
-	}
-	if useV2 {
-		image.UseV1 = false
-	} else {
-		image.UseV1 = true
 	}
 
 	TryGetProject()
@@ -108,13 +103,18 @@ func createImageRunCmd(cmd *cobra.Command, args []string) {
 		NewtUsage(nil, err)
 	}
 
-	if err := imgprod.ProduceAll(b, ver, keys, encKeyFilename); err != nil {
+	if useV1 {
+		err = imgprod.ProduceAllV1(b, ver, keys, encKeyFilename)
+	} else {
+		err = imgprod.ProduceAll(b, ver, keys, encKeyFilename)
+	}
+	if err != nil {
 		NewtUsage(nil, err)
 	}
 }
 
-func resignImage(imgPath string, keys []image.ImageKey, keyId uint8) error {
-	img, err := image.ReadRawImage(imgPath)
+func resignImage(imgPath string, keys []image.ImageSigKey, keyId uint8) error {
+	img, err := image.ReadImage(imgPath)
 	if err != nil {
 		return err
 	}
@@ -141,32 +141,8 @@ func resignImage(imgPath string, keys []image.ImageKey, keyId uint8) error {
 }
 
 func resignImageRunCmd(cmd *cobra.Command, args []string) {
-	if len(args) < 1 {
-		NewtUsage(cmd, util.NewNewtError("Must specify image to re-sign."))
-	}
-
-	if useV1 && useV2 {
-		NewtUsage(cmd, util.NewNewtError("Either -1, or -2, but not both"))
-	}
-	if useV2 {
-		image.UseV1 = false
-	} else {
-		image.UseV1 = true
-		if retain {
-			NewtUsage(cmd, util.NewNewtError(
-				"The --retain switch is not compatible with v1 images"))
-		}
-	}
-
-	imgName := args[0]
-	keys, keyId, err := parseKeyArgs(args[1:])
-	if err != nil {
-		NewtUsage(cmd, err)
-	}
-
-	if err := resignImage(imgName, keys, keyId); err != nil {
-		NewtUsage(nil, err)
-	}
+	NewtUsage(nil, util.NewNewtError(
+		"This command is deprecated.  Use the mimg tool to resign images."))
 }
 
 func AddImageCommands(cmd *cobra.Command) {

@@ -38,11 +38,6 @@ func runRunCmd(cmd *cobra.Command, args []string) {
 	if useV1 && useV2 {
 		NewtUsage(cmd, util.NewNewtError("Either -1, or -2, but not both"))
 	}
-	if useV2 {
-		image.UseV1 = false
-	} else {
-		image.UseV1 = true
-	}
 
 	TryGetProject()
 
@@ -94,7 +89,7 @@ func runRunCmd(cmd *cobra.Command, args []string) {
 				NewtUsage(nil, err)
 			}
 
-			var keys []image.ImageKey
+			var keys []image.ImageSigKey
 
 			if len(args) > 2 {
 				keys, _, err = parseKeyArgs(args[2:])
