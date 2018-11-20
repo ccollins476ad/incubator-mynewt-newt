@@ -327,6 +327,7 @@ func (ic *ImageCreator) CreateV1() (ImageV1, error) {
 		hdr.Flags |= keyFlag
 		hdr.TlvSz = 4 + ic.SigKeys[0].sigLen()
 	}
+	hdr.TlvSz += 4 + 32
 
 	if err := ic.addToHash(hdr); err != nil {
 		return ri, err
@@ -347,7 +348,7 @@ func (ic *ImageCreator) CreateV1() (ImageV1, error) {
 	/*
 	 * Followed by data.
 	 */
-	dataBuf := make([]byte, 16)
+	dataBuf := make([]byte, 1024)
 	r := bytes.NewReader(ic.Body)
 	w := bytes.Buffer{}
 	for {
@@ -371,7 +372,7 @@ func (ic *ImageCreator) CreateV1() (ImageV1, error) {
 	ri.Body = w.Bytes()
 
 	hashBytes := ic.hash.Sum(nil)
-	fmt.Printf("HASH:\n%s\n", hex.Dump(hashBytes))
+	//fmt.Printf("HASH:\n%s\n", hex.Dump(hashBytes))
 
 	util.StatusMessage(util.VERBOSITY_VERBOSE,
 		"Computed Hash for image as %s\n", hex.EncodeToString(hashBytes))

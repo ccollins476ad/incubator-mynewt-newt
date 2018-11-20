@@ -277,7 +277,7 @@ func (ic *ImageCreator) addToHash(itf interface{}) error {
 	if err := binary.Write(b, binary.LittleEndian, itf); err != nil {
 		return err
 	}
-	fmt.Printf("H: %v\n", b.Bytes())
+	//fmt.Printf("H: \n%s\n", hex.Dump(b.Bytes()))
 
 	if err := binary.Write(ic.hash, binary.LittleEndian,
 		itf); err != nil {
