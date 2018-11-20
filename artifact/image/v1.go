@@ -24,9 +24,9 @@ import (
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
-	"fmt"
 	"io"
 	"io/ioutil"
 
@@ -272,6 +272,34 @@ func generateV1SigTlv(key ImageSigKey, hash []byte) (ImageTlv, error) {
 	}
 }
 
+func calcHashV1(img ImageV1, initialHash []byte) ([]byte, error) {
+	hash := sha256.New()
+
+	add := func(itf interface{}) error {
+		if err := binary.Write(hash, binary.LittleEndian, itf); err != nil {
+			return util.FmtNewtError("Failed to hash data: %s", err.Error())
+		}
+
+		return nil
+	}
+
+	if initialHash != nil {
+		if err := add(initialHash); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := add(img.Header); err != nil {
+		return nil, err
+	}
+
+	if err := add(img.Body); err != nil {
+		return nil, err
+	}
+
+	return hash.Sum(nil), nil
+}
+
 func (ic *ImageCreator) CreateV1() (ImageV1, error) {
 	ri := ImageV1{}
 
@@ -279,12 +307,6 @@ func (ic *ImageCreator) CreateV1() (ImageV1, error) {
 		return ri, util.FmtNewtError(
 			"V1 image format only allows one key, %d keys specified",
 			len(ic.SigKeys))
-	}
-
-	if ic.InitialHash != nil {
-		if err := ic.addToHash(ic.InitialHash); err != nil {
-			return ri, err
-		}
 	}
 
 	// First the header
@@ -329,19 +351,19 @@ func (ic *ImageCreator) CreateV1() (ImageV1, error) {
 	}
 	hdr.TlvSz += 4 + 32
 
-	if err := ic.addToHash(hdr); err != nil {
-		return ri, err
-	}
-
 	if hdr.HdrSz > IMAGE_HEADER_SIZE {
-		/*
-		 * Pad the image (and hash) with zero bytes to fill
-		 * out the buffer.
-		 */
-		buf := make([]byte, hdr.HdrSz-IMAGE_HEADER_SIZE)
+		// Pad the header out to the given size.  There will
+		// just be zeros between the header and the start of
+		// the image when it is padded.
+		extra := ic.HeaderSize - IMAGE_HEADER_SIZE
+		if extra < 0 {
+			return ri, util.FmtNewtError("Image header must be at "+
+				"least %d bytes", IMAGE_HEADER_SIZE)
+		}
 
-		if err := ic.addToHash(buf); err != nil {
-			return ri, err
+		hdr.HdrSz = uint16(ic.HeaderSize)
+		for i := 0; i < extra; i++ {
+			ri.Body = append(ri.Body, 0)
 		}
 	}
 
@@ -361,9 +383,6 @@ func (ic *ImageCreator) CreateV1() (ImageV1, error) {
 			break
 		}
 
-		if err := ic.addToHash(dataBuf[0:cnt]); err != nil {
-			return ri, err
-		}
 		if _, err = w.Write(dataBuf[0:cnt]); err != nil {
 			return ri, util.FmtNewtError(
 				"Failed to write to image body: %s", err.Error())
@@ -371,7 +390,10 @@ func (ic *ImageCreator) CreateV1() (ImageV1, error) {
 	}
 	ri.Body = w.Bytes()
 
-	hashBytes := ic.hash.Sum(nil)
+	hashBytes, err := calcHashV1(ri, ic.InitialHash)
+	if err != nil {
+		return ri, err
+	}
 
 	util.StatusMessage(util.VERBOSITY_VERBOSE,
 		"Computed Hash for image as %s\n", hex.EncodeToString(hashBytes))

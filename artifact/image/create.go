@@ -31,7 +31,7 @@ import (
 	"encoding/asn1"
 	"encoding/binary"
 	"encoding/hex"
-	"hash"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"math/big"
@@ -48,8 +48,6 @@ type ImageCreator struct {
 	HeaderSize   int
 	InitialHash  []byte
 	Bootable     bool
-
-	hash hash.Hash
 }
 
 type ImageCreateOpts struct {
@@ -69,7 +67,6 @@ func NewImageCreator() ImageCreator {
 	return ImageCreator{
 		HeaderSize: IMAGE_HEADER_SIZE,
 		Bootable:   true,
-		hash:       sha256.New(),
 	}
 }
 
@@ -271,28 +268,43 @@ func GenerateImage(opts ImageCreateOpts) (Image, error) {
 	return ri, nil
 }
 
-func (ic *ImageCreator) addToHash(itf interface{}) error {
-	if err := binary.Write(ic.hash, binary.LittleEndian,
-		itf); err != nil {
+func calcHash(img Image, initialHash []byte) ([]byte, error) {
+	hash := sha256.New()
 
-		return util.FmtNewtError("Failed to hash data: %s", err.Error())
+	add := func(itf interface{}) error {
+		b := &bytes.Buffer{}
+		if err := binary.Write(b, binary.LittleEndian, itf); err != nil {
+			return err
+		}
+		fmt.Printf("H:\n%s\n", hex.Dump(b.Bytes()))
+		if err := binary.Write(hash, binary.LittleEndian, itf); err != nil {
+			return util.FmtNewtError("Failed to hash data: %s", err.Error())
+		}
+
+		return nil
 	}
 
-	return nil
+	if initialHash != nil {
+		if err := add(initialHash); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := add(img.Header); err != nil {
+		return nil, err
+	}
+
+	if err := add(img.Body); err != nil {
+		return nil, err
+	}
+
+	return hash.Sum(nil), nil
 }
 
 func (ic *ImageCreator) Create() (Image, error) {
 	ri := Image{}
 
-	if ic.InitialHash != nil {
-		if err := ic.addToHash(ic.InitialHash); err != nil {
-			return ri, err
-		}
-	}
-
-	/*
-	 * First the header
-	 */
+	// First the header
 	hdr := ImageHdr{
 		Magic: IMAGE_MAGIC,
 		Pad1:  0,
@@ -313,32 +325,18 @@ func (ic *ImageCreator) Create() (Image, error) {
 	}
 
 	if ic.HeaderSize != 0 {
-		/*
-		 * Pad the header out to the given size.  There will
-		 * just be zeros between the header and the start of
-		 * the image when it is padded.
-		 */
-		if ic.HeaderSize < IMAGE_HEADER_SIZE {
+		// Pad the header out to the given size.  There will
+		// just be zeros between the header and the start of
+		// the image when it is padded.
+		extra := ic.HeaderSize - IMAGE_HEADER_SIZE
+		if extra < 0 {
 			return ri, util.FmtNewtError("Image header must be at "+
 				"least %d bytes", IMAGE_HEADER_SIZE)
 		}
 
 		hdr.HdrSz = uint16(ic.HeaderSize)
-	}
-
-	if err := ic.addToHash(hdr); err != nil {
-		return ri, err
-	}
-
-	if hdr.HdrSz > IMAGE_HEADER_SIZE {
-		/*
-		 * Pad the image (and hash) with zero bytes to fill
-		 * out the buffer.
-		 */
-		buf := make([]byte, hdr.HdrSz-IMAGE_HEADER_SIZE)
-
-		if err := ic.addToHash(buf); err != nil {
-			return ri, err
+		for i := 0; i < extra; i++ {
+			ri.Body = append(ri.Body, 0)
 		}
 	}
 
@@ -371,9 +369,6 @@ func (ic *ImageCreator) Create() (Image, error) {
 			break
 		}
 
-		if err := ic.addToHash(dataBuf[0:cnt]); err != nil {
-			return ri, err
-		}
 		if ic.CipherSecret == nil {
 			_, err = w.Write(dataBuf[0:cnt])
 		} else {
@@ -385,9 +380,12 @@ func (ic *ImageCreator) Create() (Image, error) {
 				"Failed to write to image body: %s", err.Error())
 		}
 	}
-	ri.Body = w.Bytes()
+	ri.Body = append(ri.Body, w.Bytes()...)
 
-	hashBytes := ic.hash.Sum(nil)
+	hashBytes, err := calcHash(ri, ic.InitialHash)
+	if err != nil {
+		return ri, err
+	}
 
 	util.StatusMessage(util.VERBOSITY_VERBOSE,
 		"Computed Hash for image as %s\n", hex.EncodeToString(hashBytes))

@@ -276,6 +276,19 @@ func (i *Image) FindTlvs(tlvType uint8) []ImageTlv {
 	return tlvs
 }
 
+func (i *Image) FindUniqueTlv(tlvType uint8) (*ImageTlv, error) {
+	tlvs := i.FindTlvs(tlvType)
+	if len(tlvs) == 0 {
+		return nil, nil
+	}
+	if len(tlvs) > 1 {
+		return nil, util.FmtNewtError("Image contains %d TLVs with type %d",
+			len(tlvs), tlvType)
+	}
+
+	return &tlvs[0], nil
+}
+
 func (i *Image) RemoveTlvsIf(pred func(tlv ImageTlv) bool) int {
 	numRmed := 0
 	for idx := 0; idx < len(i.Tlvs); {
@@ -292,15 +305,16 @@ func (i *Image) RemoveTlvsIf(pred func(tlv ImageTlv) bool) int {
 }
 
 func (i *Image) Hash() ([]byte, error) {
-	tlvs := i.FindTlvs(IMAGE_TLV_SHA256)
-	if len(tlvs) == 0 {
-		return nil, util.FmtNewtError("Image does not contain hash TLV")
-	}
-	if len(tlvs) > 1 {
-		return nil, util.FmtNewtError("Image contains %d hash TLVs", len(tlvs))
+	tlv, err := i.FindUniqueTlv(IMAGE_TLV_SHA256)
+	if err != nil {
+		return nil, err
 	}
 
-	return tlvs[0].Data, nil
+	if tlv == nil {
+		return nil, util.FmtNewtError("Image does not contain hash TLV")
+	}
+
+	return tlv.Data, nil
 }
 
 func (i *Image) WritePlusOffsets(w io.Writer) (ImageOffsets, error) {
