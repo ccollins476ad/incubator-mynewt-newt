@@ -319,6 +319,15 @@ func (ic *ImageCreator) CreateV1() (ImageV1, error) {
 		hdr.HdrSz = uint16(ic.HeaderSize)
 	}
 
+	if len(ic.SigKeys) > 0 {
+		keyFlag, err := ic.SigKeys[0].sigHdrTypeV1()
+		if err != nil {
+			return ri, err
+		}
+		hdr.Flags |= keyFlag
+		hdr.TlvSz = 4 + ic.SigKeys[0].sigLen()
+	}
+
 	if err := ic.addToHash(hdr); err != nil {
 		return ri, err
 	}
@@ -384,12 +393,6 @@ func (ic *ImageCreator) CreateV1() (ImageV1, error) {
 			return ri, err
 		}
 		ri.Tlvs = append(ri.Tlvs, tlv)
-		keyFlag, err := ic.SigKeys[0].sigHdrTypeV1()
-		if err != nil {
-			return ri, err
-		}
-
-		hdr.Flags |= keyFlag
 	}
 
 	offs, err := ri.Offsets()
