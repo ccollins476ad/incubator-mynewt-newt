@@ -22,12 +22,11 @@ package image
 import (
 	"bytes"
 	"crypto"
-	"crypto/aes"
-	"crypto/cipher"
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/binary"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"io/ioutil"
 
@@ -297,17 +296,13 @@ func (ic *ImageCreator) CreateV1() (ImageV1, error) {
 		HdrSz: IMAGE_HEADER_SIZE,
 		Pad2:  0,
 		ImgSz: uint32(len(ic.Body)),
-		Flags: 0,
+		Flags: IMAGEv1_F_SHA256,
 		Vers:  ic.Version,
 		Pad3:  0,
 	}
 
 	if !ic.Bootable {
-		hdr.Flags |= IMAGE_F_NON_BOOTABLE
-	}
-
-	if ic.CipherSecret != nil {
-		hdr.Flags |= IMAGE_F_ENCRYPTED
+		hdr.Flags |= IMAGEv1_F_NON_BOOTABLE
 	}
 
 	if ic.HeaderSize != 0 {
@@ -340,23 +335,10 @@ func (ic *ImageCreator) CreateV1() (ImageV1, error) {
 		}
 	}
 
-	ri.Header = hdr
-
-	var stream cipher.Stream
-	if ic.CipherSecret != nil {
-		block, err := aes.NewCipher(ic.PlainSecret)
-		if err != nil {
-			return ri, util.NewNewtError("Failed to create block cipher")
-		}
-		nonce := []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
-		stream = cipher.NewCTR(block, nonce)
-	}
-
 	/*
 	 * Followed by data.
 	 */
 	dataBuf := make([]byte, 16)
-	encBuf := make([]byte, 16)
 	r := bytes.NewReader(ic.Body)
 	w := bytes.Buffer{}
 	for {
@@ -372,13 +354,7 @@ func (ic *ImageCreator) CreateV1() (ImageV1, error) {
 		if err := ic.addToHash(dataBuf[0:cnt]); err != nil {
 			return ri, err
 		}
-		if ic.CipherSecret == nil {
-			_, err = w.Write(dataBuf[0:cnt])
-		} else {
-			stream.XORKeyStream(encBuf, dataBuf[0:cnt])
-			_, err = w.Write(encBuf[0:cnt])
-		}
-		if err != nil {
+		if _, err = w.Write(dataBuf[0:cnt]); err != nil {
 			return ri, util.FmtNewtError(
 				"Failed to write to image body: %s", err.Error())
 		}
@@ -407,21 +383,21 @@ func (ic *ImageCreator) CreateV1() (ImageV1, error) {
 			return ri, err
 		}
 		ri.Tlvs = append(ri.Tlvs, tlv)
-	}
-
-	if ic.CipherSecret != nil {
-		tlv, err := generateEncTlv(ic.CipherSecret)
+		keyFlag, err := ic.SigKeys[0].sigHdrTypeV1()
 		if err != nil {
 			return ri, err
 		}
-		ri.Tlvs = append(ri.Tlvs, tlv)
+
+		hdr.Flags |= keyFlag
 	}
 
 	offs, err := ri.Offsets()
 	if err != nil {
 		return ri, err
 	}
-	ri.Header.TlvSz = uint16(offs.TotalSize - offs.Tlvs[0])
+	hdr.TlvSz = uint16(offs.TotalSize - offs.Tlvs[0])
+
+	ri.Header = hdr
 
 	return ri, nil
 }
@@ -466,6 +442,9 @@ func GenerateV1Image(opts ImageCreateOpts) (ImageV1, error) {
 	if err != nil {
 		return ImageV1{}, err
 	}
+
+	fmt.Printf("%+v\n", ri.Header)
+	fmt.Printf("%+v\n", ri.Tlvs)
 
 	return ri, nil
 }
