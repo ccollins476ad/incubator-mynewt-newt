@@ -362,6 +362,7 @@ func (ic *ImageCreator) CreateV1() (ImageV1, error) {
 	ri.Body = w.Bytes()
 
 	hashBytes := ic.hash.Sum(nil)
+	fmt.Printf("HASH:\n%s\n", hex.Dump(hashBytes))
 
 	util.StatusMessage(util.VERBOSITY_VERBOSE,
 		"Computed Hash for image as %s\n", hex.EncodeToString(hashBytes))
