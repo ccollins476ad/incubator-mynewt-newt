@@ -32,7 +32,7 @@ import (
 var OptOutFilename string
 var OptInPlace bool
 
-func MimgUsage(cmd *cobra.Command, err error) {
+func LarvaUsage(cmd *cobra.Command, err error) {
 	if err != nil {
 		sErr := err.(*util.NewtError)
 		log.Debugf("%s", sErr.StackTrace)

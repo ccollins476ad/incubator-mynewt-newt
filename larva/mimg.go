@@ -25,34 +25,34 @@ import (
 	log "github.com/Sirupsen/logrus"
 	"github.com/spf13/cobra"
 
-	"mynewt.apache.org/newt/mimg/cli"
+	"mynewt.apache.org/newt/larva/cli"
 	"mynewt.apache.org/newt/util"
 )
 
-var MimgLogLevel log.Level
-var mimgVersion = "0.0.1"
+var LarvaLogLevel log.Level
+var larvaVersion = "0.0.1"
 
 func main() {
-	mimgHelpText := ""
-	mimgHelpEx := ""
+	larvaHelpText := ""
+	larvaHelpEx := ""
 
 	logLevelStr := ""
-	mimgCmd := &cobra.Command{
-		Use:     "mimg",
-		Short:   "mimg is a tool to help you compose and build your own OS",
-		Long:    mimgHelpText,
-		Example: mimgHelpEx,
+	larvaCmd := &cobra.Command{
+		Use:     "larva",
+		Short:   "larva is a tool to help you compose and build your own OS",
+		Long:    larvaHelpText,
+		Example: larvaHelpEx,
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			logLevel, err := log.ParseLevel(logLevelStr)
 			if err != nil {
-				cli.MimgUsage(nil, util.ChildNewtError(err))
+				cli.LarvaUsage(nil, util.ChildNewtError(err))
 			}
-			MimgLogLevel = logLevel
+			LarvaLogLevel = logLevel
 
-			if err := util.Init(MimgLogLevel, "",
+			if err := util.Init(LarvaLogLevel, "",
 				util.VERBOSITY_DEFAULT); err != nil {
 
-				cli.MimgUsage(nil, err)
+				cli.LarvaUsage(nil, err)
 			}
 		},
 
@@ -61,24 +61,24 @@ func main() {
 		},
 	}
 
-	mimgCmd.PersistentFlags().StringVarP(&logLevelStr, "loglevel", "l",
+	larvaCmd.PersistentFlags().StringVarP(&logLevelStr, "loglevel", "l",
 		"WARN", "Log level")
 
-	versHelpText := `Display the mimg version number`
-	versHelpEx := "  mimg version"
+	versHelpText := `Display the larva version number`
+	versHelpEx := "  larva version"
 	versCmd := &cobra.Command{
 		Use:     "version",
-		Short:   "Display the mimg version number",
+		Short:   "Display the larva version number",
 		Long:    versHelpText,
 		Example: versHelpEx,
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Printf("%s\n", mimgVersion)
+			fmt.Printf("%s\n", larvaVersion)
 		},
 	}
-	mimgCmd.AddCommand(versCmd)
+	larvaCmd.AddCommand(versCmd)
 
-	cli.AddImageCommands(mimgCmd)
-	cli.AddMfgCommands(mimgCmd)
+	cli.AddImageCommands(larvaCmd)
+	cli.AddMfgCommands(larvaCmd)
 
-	mimgCmd.Execute()
+	larvaCmd.Execute()
 }

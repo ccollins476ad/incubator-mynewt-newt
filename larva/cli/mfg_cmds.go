@@ -29,7 +29,7 @@ import (
 
 	"mynewt.apache.org/newt/artifact/flash"
 	"mynewt.apache.org/newt/artifact/manifest"
-	"mynewt.apache.org/newt/mimg/mfg"
+	"mynewt.apache.org/newt/larva/mfg"
 	"mynewt.apache.org/newt/util"
 )
 
@@ -86,7 +86,7 @@ func createMfgMap(binDir string, areas []flash.FlashArea) (mfg.MfgMap, error) {
 
 func runSplitCmd(cmd *cobra.Command, args []string) {
 	if len(args) < 3 {
-		MimgUsage(cmd, nil)
+		LarvaUsage(cmd, nil)
 	}
 
 	imgFilename := args[0]
@@ -95,35 +95,35 @@ func runSplitCmd(cmd *cobra.Command, args []string) {
 
 	mfgBin, err := ioutil.ReadFile(imgFilename)
 	if err != nil {
-		MimgUsage(cmd, util.FmtNewtError(
+		LarvaUsage(cmd, util.FmtNewtError(
 			"Failed to read manufacturing image: %s", err.Error()))
 	}
 
 	areas, err := readFlashAreas(manFilename)
 	if err != nil {
-		MimgUsage(cmd, err)
+		LarvaUsage(cmd, err)
 	}
 
 	mm, err := mfg.Split(mfgBin, optDeviceNum, areas)
 	if err != nil {
-		MimgUsage(nil, err)
+		LarvaUsage(nil, err)
 	}
 
 	if err := os.Mkdir(outDir, os.ModePerm); err != nil {
-		MimgUsage(nil, util.ChildNewtError(err))
+		LarvaUsage(nil, util.ChildNewtError(err))
 	}
 
 	for name, data := range mm {
 		filename := fmt.Sprintf("%s/%s.bin", outDir, name)
 		if err := ioutil.WriteFile(filename, data, os.ModePerm); err != nil {
-			MimgUsage(nil, util.ChildNewtError(err))
+			LarvaUsage(nil, util.ChildNewtError(err))
 		}
 	}
 }
 
 func runJoinCmd(cmd *cobra.Command, args []string) {
 	if len(args) < 3 {
-		MimgUsage(cmd, nil)
+		LarvaUsage(cmd, nil)
 	}
 
 	binDir := args[0]
@@ -132,21 +132,21 @@ func runJoinCmd(cmd *cobra.Command, args []string) {
 
 	areas, err := readFlashAreas(manFilename)
 	if err != nil {
-		MimgUsage(cmd, err)
+		LarvaUsage(cmd, err)
 	}
 
 	mm, err := createMfgMap(binDir, areas)
 	if err != nil {
-		MimgUsage(nil, err)
+		LarvaUsage(nil, err)
 	}
 
 	mfgBin, err := mfg.Join(mm, 0xff, areas)
 	if err != nil {
-		MimgUsage(nil, err)
+		LarvaUsage(nil, err)
 	}
 
 	if err := ioutil.WriteFile(outFilename, mfgBin, os.ModePerm); err != nil {
-		MimgUsage(nil, util.ChildNewtError(err))
+		LarvaUsage(nil, util.ChildNewtError(err))
 	}
 }
 

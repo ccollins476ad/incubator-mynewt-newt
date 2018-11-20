@@ -192,7 +192,7 @@ func AddImageCommands(cmd *cobra.Command) {
 	AddTabCompleteFn(createImageCmd, targetList)
 
 	resignImageHelpText :=
-		"This command is obsolete; use the mimg tool to resign images."
+		"This command is obsolete; use the `larva` tool to resign images."
 
 	resignImageCmd := &cobra.Command{
 		Use:   "resign-image",

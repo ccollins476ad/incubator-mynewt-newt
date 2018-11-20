@@ -50,74 +50,74 @@ func writeImage(img image.Image, filename string) error {
 
 func runShowCmd(cmd *cobra.Command, args []string) {
 	if len(args) < 1 {
-		MimgUsage(cmd, nil)
+		LarvaUsage(cmd, nil)
 	}
 
 	img, err := readImage(args[0])
 	if err != nil {
-		MimgUsage(cmd, err)
+		LarvaUsage(cmd, err)
 	}
 
 	s, err := img.Json()
 	if err != nil {
-		MimgUsage(nil, err)
+		LarvaUsage(nil, err)
 	}
 	fmt.Printf("%s\n", s)
 }
 
 func runSignCmd(cmd *cobra.Command, args []string) {
 	if len(args) < 2 {
-		MimgUsage(cmd, nil)
+		LarvaUsage(cmd, nil)
 	}
 
 	inFilename := args[0]
 	outFilename, err := CalcOutFilename(inFilename)
 	if err != nil {
-		MimgUsage(cmd, err)
+		LarvaUsage(cmd, err)
 	}
 
 	img, err := readImage(inFilename)
 	if err != nil {
-		MimgUsage(cmd, err)
+		LarvaUsage(cmd, err)
 	}
 
 	keys, err := image.ReadKeys(args[1:])
 	if err != nil {
-		MimgUsage(cmd, err)
+		LarvaUsage(cmd, err)
 	}
 
 	hash, err := img.Hash()
 	if err != nil {
-		MimgUsage(cmd, util.FmtNewtError(
+		LarvaUsage(cmd, util.FmtNewtError(
 			"Failed to read hash from specified image: %s", err.Error()))
 	}
 
 	tlvs, err := image.GenerateSigTlvs(keys, hash)
 	if err != nil {
-		MimgUsage(nil, err)
+		LarvaUsage(nil, err)
 	}
 
 	img.Tlvs = append(img.Tlvs, tlvs...)
 
 	if err := writeImage(img, outFilename); err != nil {
-		MimgUsage(nil, err)
+		LarvaUsage(nil, err)
 	}
 }
 
 func runRmsigsCmd(cmd *cobra.Command, args []string) {
 	if len(args) < 1 {
-		MimgUsage(cmd, nil)
+		LarvaUsage(cmd, nil)
 	}
 
 	inFilename := args[0]
 	outFilename, err := CalcOutFilename(inFilename)
 	if err != nil {
-		MimgUsage(cmd, err)
+		LarvaUsage(cmd, err)
 	}
 
 	img, err := readImage(inFilename)
 	if err != nil {
-		MimgUsage(cmd, err)
+		LarvaUsage(cmd, err)
 	}
 
 	cnt := img.RemoveTlvsIf(func(tlv image.ImageTlv) bool {
@@ -130,7 +130,7 @@ func runRmsigsCmd(cmd *cobra.Command, args []string) {
 	log.Debugf("Removed %d existing signatures", cnt)
 
 	if err := writeImage(img, outFilename); err != nil {
-		MimgUsage(nil, err)
+		LarvaUsage(nil, err)
 	}
 }
 
