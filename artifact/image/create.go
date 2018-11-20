@@ -268,7 +268,9 @@ func GenerateImage(opts ImageCreateOpts) (Image, error) {
 	return ri, nil
 }
 
-func calcHash(img Image, initialHash []byte) ([]byte, error) {
+func calcHash(initialHash []byte, hdr ImageHdr,
+	plainBody []byte) ([]byte, error) {
+
 	hash := sha256.New()
 
 	add := func(itf interface{}) error {
@@ -290,11 +292,19 @@ func calcHash(img Image, initialHash []byte) ([]byte, error) {
 		}
 	}
 
-	if err := add(img.Header); err != nil {
+	if err := add(hdr); err != nil {
 		return nil, err
 	}
 
-	if err := add(img.Body); err != nil {
+	extra := hdr.HdrSz - IMAGE_HEADER_SIZE
+	if extra > 0 {
+		b := make([]byte, extra)
+		if err := add(b); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := add(plainBody); err != nil {
 		return nil, err
 	}
 
@@ -342,6 +352,11 @@ func (ic *ImageCreator) Create() (Image, error) {
 
 	ri.Header = hdr
 
+	hashBytes, err := calcHash(ic.InitialHash, hdr, ic.Body)
+	if err != nil {
+		return ri, err
+	}
+
 	var stream cipher.Stream
 	if ic.CipherSecret != nil {
 		block, err := aes.NewCipher(ic.PlainSecret)
@@ -381,11 +396,6 @@ func (ic *ImageCreator) Create() (Image, error) {
 		}
 	}
 	ri.Body = append(ri.Body, w.Bytes()...)
-
-	hashBytes, err := calcHash(ri, ic.InitialHash)
-	if err != nil {
-		return ri, err
-	}
 
 	util.StatusMessage(util.VERBOSITY_VERBOSE,
 		"Computed Hash for image as %s\n", hex.EncodeToString(hashBytes))
