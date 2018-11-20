@@ -71,10 +71,9 @@ type ImageHdrV1 struct {
 }
 
 type ImageV1 struct {
-	Header  ImageHdrV1
-	Body    []byte
-	Trailer ImageTrailer
-	Tlvs    []ImageTlv
+	Header ImageHdrV1
+	Body   []byte
+	Tlvs   []ImageTlv
 }
 
 func (img *ImageV1) FindTlvs(tlvType uint8) []ImageTlv {
@@ -119,13 +118,6 @@ func (img *ImageV1) WritePlusOffsets(w io.Writer) (ImageOffsets, error) {
 		return offs, util.ChildNewtError(err)
 	}
 	offset += size
-
-	offs.Trailer = offset
-	err = binary.Write(w, binary.LittleEndian, &img.Trailer)
-	if err != nil {
-		return offs, util.ChildNewtError(err)
-	}
-	offset += IMAGE_TRAILER_SIZE
 
 	for _, tlv := range img.Tlvs {
 		offs.Tlvs = append(offs.Tlvs, offset)
@@ -299,7 +291,7 @@ func (ic *ImageCreator) CreateV1() (ImageV1, error) {
 	// First the header
 	hdr := ImageHdrV1{
 		Magic: IMAGEv1_MAGIC,
-		TlvSz: 0,
+		TlvSz: 0, // Filled in later.
 		KeyId: 0,
 		Pad1:  0,
 		HdrSz: IMAGE_HEADER_SIZE,
@@ -424,6 +416,12 @@ func (ic *ImageCreator) CreateV1() (ImageV1, error) {
 		}
 		ri.Tlvs = append(ri.Tlvs, tlv)
 	}
+
+	offs, err := ri.Offsets()
+	if err != nil {
+		return ri, err
+	}
+	ri.Header.TlvSz = uint16(offs.TotalSize - offs.Tlvs[0])
 
 	return ri, nil
 }

@@ -76,6 +76,10 @@ func createImageRunCmd(cmd *cobra.Command, args []string) {
 		NewtUsage(cmd, util.NewNewtError("Either -1, or -2, but not both"))
 	}
 
+	if !useV2 {
+		useV1 = true
+	}
+
 	TryGetProject()
 
 	targetName := args[0]

@@ -38,6 +38,9 @@ func runRunCmd(cmd *cobra.Command, args []string) {
 	if useV1 && useV2 {
 		NewtUsage(cmd, util.NewNewtError("Either -1, or -2, but not both"))
 	}
+	if !useV2 {
+		useV1 = true
+	}
 
 	TryGetProject()
 
@@ -98,7 +101,12 @@ func runRunCmd(cmd *cobra.Command, args []string) {
 				}
 			}
 
-			if err := imgprod.ProduceAll(b, ver, keys, ""); err != nil {
+			if useV1 {
+				err = imgprod.ProduceAllV1(b, ver, keys, "")
+			} else {
+				err = imgprod.ProduceAll(b, ver, keys, "")
+			}
+			if err != nil {
 				NewtUsage(nil, err)
 			}
 		}
