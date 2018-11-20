@@ -31,7 +31,6 @@ import (
 	"encoding/asn1"
 	"encoding/binary"
 	"encoding/hex"
-	"fmt"
 	"hash"
 	"io"
 	"io/ioutil"
@@ -273,12 +272,6 @@ func GenerateImage(opts ImageCreateOpts) (Image, error) {
 }
 
 func (ic *ImageCreator) addToHash(itf interface{}) error {
-	b := &bytes.Buffer{}
-	if err := binary.Write(b, binary.LittleEndian, itf); err != nil {
-		return err
-	}
-	//fmt.Printf("H: \n%s\n", hex.Dump(b.Bytes()))
-
 	if err := binary.Write(ic.hash, binary.LittleEndian,
 		itf); err != nil {
 
