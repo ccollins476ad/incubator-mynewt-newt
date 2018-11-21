@@ -104,6 +104,22 @@ func generateSigRsa(key *rsa.PrivateKey, hash []byte) ([]byte, error) {
 	return signature, nil
 }
 
+func generateSigTlvRsa(key ImageSigKey, hash []byte) (ImageTlv, error) {
+	sig, err := generateSigRsa(key.Rsa, hash)
+	if err != nil {
+		return ImageTlv{}, err
+	}
+
+	return ImageTlv{
+		Header: ImageTlvHdr{
+			Type: key.sigTlvType(),
+			Pad:  0,
+			Len:  256, /* 2048 bits */
+		},
+		Data: sig,
+	}, nil
+}
+
 func generateSigEc(key *ecdsa.PrivateKey, hash []byte) ([]byte, error) {
 	r, s, err := ecdsa.Sign(rand.Reader, key, hash)
 	if err != nil {
@@ -121,22 +137,6 @@ func generateSigEc(key *ecdsa.PrivateKey, hash []byte) ([]byte, error) {
 	}
 
 	return signature, nil
-}
-
-func generateSigTlvRsa(key ImageSigKey, hash []byte) (ImageTlv, error) {
-	sig, err := generateSigRsa(key.Rsa, hash)
-	if err != nil {
-		return ImageTlv{}, err
-	}
-
-	return ImageTlv{
-		Header: ImageTlvHdr{
-			Type: key.sigTlvType(),
-			Pad:  0,
-			Len:  256, /* 2048 bits */
-		},
-		Data: sig,
-	}, nil
 }
 
 func generateSigTlvEc(key ImageSigKey, hash []byte) (ImageTlv, error) {
@@ -167,7 +167,7 @@ func generateSigTlvEc(key ImageSigKey, hash []byte) (ImageTlv, error) {
 		Header: ImageTlvHdr{
 			Type: key.sigTlvType(),
 			Pad:  0,
-			Len:  sigLen + uint16(len(pad)),
+			Len:  sigLen,
 		},
 		Data: b.Bytes(),
 	}, nil
