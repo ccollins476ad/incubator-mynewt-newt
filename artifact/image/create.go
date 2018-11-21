@@ -31,7 +31,6 @@ import (
 	"encoding/asn1"
 	"encoding/binary"
 	"encoding/hex"
-	"fmt"
 	"io"
 	"io/ioutil"
 	"math/big"
@@ -278,7 +277,6 @@ func calcHash(initialHash []byte, hdr ImageHdr,
 		if err := binary.Write(b, binary.LittleEndian, itf); err != nil {
 			return err
 		}
-		fmt.Printf("H:\n%s\n", hex.Dump(b.Bytes()))
 		if err := binary.Write(hash, binary.LittleEndian, itf); err != nil {
 			return util.FmtNewtError("Failed to hash data: %s", err.Error())
 		}
