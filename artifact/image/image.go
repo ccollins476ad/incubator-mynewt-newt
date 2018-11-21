@@ -111,10 +111,9 @@ type ImageTrailer struct {
 }
 
 type Image struct {
-	Header  ImageHdr
-	Body    []byte
-	Trailer ImageTrailer
-	Tlvs    []ImageTlv
+	Header ImageHdr
+	Body   []byte
+	Tlvs   []ImageTlv
 }
 
 type ImageOffsets struct {
@@ -221,7 +220,8 @@ func (img *Image) Map() (map[string]interface{}, error) {
 	m := map[string]interface{}{}
 	m["header"] = img.Header.Map(offs.Header)
 	m["body"] = rawBodyMap(offs.Body)
-	m["trailer"] = img.Trailer.Map(offs.Trailer)
+	trailer := img.Trailer()
+	m["trailer"] = trailer.Map(offs.Trailer)
 
 	tlvMaps := []map[string]interface{}{}
 	for i, tlv := range img.Tlvs {
@@ -304,6 +304,18 @@ func (i *Image) RemoveTlvsIf(pred func(tlv ImageTlv) bool) int {
 	return numRmed
 }
 
+func (img *Image) Trailer() ImageTrailer {
+	trailer := ImageTrailer{
+		Magic:     IMAGE_TRAILER_MAGIC,
+		TlvTotLen: IMAGE_TRAILER_SIZE,
+	}
+	for _, tlv := range img.Tlvs {
+		trailer.TlvTotLen += IMAGE_TLV_SIZE + tlv.Header.Len
+	}
+
+	return trailer
+}
+
 func (i *Image) Hash() ([]byte, error) {
 	tlv, err := i.FindUniqueTlv(IMAGE_TLV_SHA256)
 	if err != nil {
@@ -336,8 +348,9 @@ func (i *Image) WritePlusOffsets(w io.Writer) (ImageOffsets, error) {
 	}
 	offset += size
 
+	trailer := i.Trailer()
 	offs.Trailer = offset
-	err = binary.Write(w, binary.LittleEndian, &i.Trailer)
+	err = binary.Write(w, binary.LittleEndian, &trailer)
 	if err != nil {
 		return offs, util.ChildNewtError(err)
 	}
@@ -491,6 +504,7 @@ func ParseImage(imgData []byte) (Image, error) {
 	offset += size
 
 	var tlvs []ImageTlv
+	tlvLen := IMAGE_TRAILER_SIZE
 	for offset < len(imgData) {
 		tlv, size, err := parseRawTlv(imgData, offset)
 		if err != nil {
@@ -499,11 +513,18 @@ func ParseImage(imgData []byte) (Image, error) {
 
 		tlvs = append(tlvs, tlv)
 		offset += size
+
+		tlvLen += IMAGE_TLV_SIZE + int(tlv.Header.Len)
+	}
+
+	if int(trailer.TlvTotLen) != tlvLen {
+		return img, util.FmtNewtError(
+			"invalid image: trailer indicates TLV-length=%d; actual=%d",
+			trailer.TlvTotLen, tlvLen)
 	}
 
 	img.Header = hdr
 	img.Body = body
-	img.Trailer = trailer
 	img.Tlvs = tlvs
 
 	return img, nil

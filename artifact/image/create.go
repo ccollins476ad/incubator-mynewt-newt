@@ -400,11 +400,6 @@ func (ic *ImageCreator) Create() (Image, error) {
 	util.StatusMessage(util.VERBOSITY_VERBOSE,
 		"Computed Hash for image as %s\n", hex.EncodeToString(hashBytes))
 
-	// Trailer.
-	ri.Trailer = ImageTrailer{
-		Magic: IMAGE_TRAILER_MAGIC,
-	}
-
 	// Hash TLV.
 	tlv := ImageTlv{
 		Header: ImageTlvHdr{
@@ -429,13 +424,6 @@ func (ic *ImageCreator) Create() (Image, error) {
 		}
 		ri.Tlvs = append(ri.Tlvs, tlv)
 	}
-
-	totalSize, err := ri.TotalSize()
-	if err != nil {
-		return ri, err
-	}
-	ri.Trailer.TlvTotLen =
-		uint16(totalSize - int(ri.Header.HdrSz) - len(ri.Body))
 
 	return ri, nil
 }
