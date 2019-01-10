@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"mynewt.apache.org/newt/artifact/image"
+	"mynewt.apache.org/newt/artifact/sec"
 	"mynewt.apache.org/newt/newt/builder"
 	"mynewt.apache.org/newt/newt/newtutil"
 	"mynewt.apache.org/newt/newt/pkg"
@@ -44,7 +45,7 @@ func loadDecodedMfg(basePath string) (DecodedMfg, error) {
 }
 
 func LoadMfgEmitter(basePkg *pkg.LocalPackage,
-	ver image.ImageVersion, keys []image.ImageSigKey) (MfgEmitter, error) {
+	ver image.ImageVersion, keys []sec.SignKey) (MfgEmitter, error) {
 
 	dm, err := loadDecodedMfg(basePkg.BasePath())
 	if err != nil {

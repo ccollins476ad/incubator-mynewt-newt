@@ -31,6 +31,7 @@ import (
 	"mynewt.apache.org/newt/artifact/manifest"
 	"mynewt.apache.org/newt/artifact/mfg"
 	"mynewt.apache.org/newt/artifact/misc"
+	"mynewt.apache.org/newt/artifact/sec"
 	"mynewt.apache.org/newt/newt/builder"
 	"mynewt.apache.org/newt/newt/flashmap"
 	"mynewt.apache.org/newt/newt/target"
@@ -77,7 +78,7 @@ type MfgEmitter struct {
 	Targets []MfgEmitTarget
 	Raws    []MfgEmitRaw
 	Meta    *MfgEmitMeta
-	Keys    []image.ImageSigKey
+	Keys    []sec.SignKey
 
 	Mfg      mfg.Mfg
 	Device   int
@@ -146,7 +147,7 @@ func newMfgEmitMeta(bm MfgBuildMeta, metaOff int) MfgEmitMeta {
 
 // NewMfgEmitter creates an mfg emitter from an mfg builder.
 func NewMfgEmitter(mb MfgBuilder, name string, ver image.ImageVersion,
-	device int, keys []image.ImageSigKey) (MfgEmitter, error) {
+	device int, keys []sec.SignKey) (MfgEmitter, error) {
 
 	me := MfgEmitter{
 		Name:     name,
@@ -254,7 +255,7 @@ func (me *MfgEmitter) createSigs() ([]manifest.MfgManifestSig, error) {
 		if err != nil {
 			return nil, err
 		}
-		keyHash := image.RawKeyHash(pubKey)
+		keyHash := sec.RawKeyHash(pubKey)
 
 		sigs = append(sigs, manifest.MfgManifestSig{
 			Key: hex.EncodeToString(keyHash),

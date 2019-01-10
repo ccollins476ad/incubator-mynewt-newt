@@ -20,7 +20,6 @@
 package cli
 
 import (
-	"encoding/hex"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -399,11 +398,6 @@ func runSignMfgCmd(cmd *cobra.Command, args []string) {
 			"Failed to read signature: %s", err.Error()))
 	}
 
-	if len(mman.Signature) != 0 && len(mman.Signature) != len(sig) {
-		util.StatusMessage(util.VERBOSITY_QUIET,
-			"Warning: old and new signature lengths differ (%d != %d)",
-			len(mman.Signature), len(sig))
-	}
 	if len(sig) > MAX_SIG_LEN {
 		LarvaUsage(nil, util.FmtNewtError(
 			"signature larger than arbitrary maximum (%d > %d)",
@@ -411,7 +405,7 @@ func runSignMfgCmd(cmd *cobra.Command, args []string) {
 	}
 
 	// Update manifest.
-	mman.Signature = hex.EncodeToString(sig)
+	//mman.Signature = hex.EncodeToString(sig)
 
 	// Write new artifacts.
 	if outDir != mfgDir {
