@@ -40,6 +40,7 @@ type MfgManifest struct {
 	Device     int               `json:"device"`
 	BinPath    string            `json:"bin_path"`
 	Bsp        string            `json:"bsp"`
+	Signature  string            `json:"signature"`
 	FlashAreas []flash.FlashArea `json:"flash_map"`
 
 	Targets []MfgManifestTarget `json:"targets"`

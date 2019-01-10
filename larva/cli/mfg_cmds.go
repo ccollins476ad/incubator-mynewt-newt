@@ -20,6 +20,7 @@
 package cli
 
 import (
+	"encoding/hex"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -34,6 +35,8 @@ import (
 	"mynewt.apache.org/newt/larva/lvmfg"
 	"mynewt.apache.org/newt/util"
 )
+
+const MAX_SIG_LEN = 1024 // Bytes.
 
 func readMfgBin(filename string) ([]byte, error) {
 	bin, err := ioutil.ReadFile(filename)
@@ -370,6 +373,65 @@ func runRehashCmd(cmd *cobra.Command, args []string) {
 	}
 }
 
+func runSignMfgCmd(cmd *cobra.Command, args []string) {
+	if len(args) < 2 {
+		LarvaUsage(cmd, nil)
+	}
+
+	mfgDir := args[0]
+	sigPath := args[1]
+
+	outDir, err := CalcOutFilename(mfgDir)
+	if err != nil {
+		LarvaUsage(cmd, err)
+	}
+
+	// Read manifest.
+	mman, err := readManifest(mfgDir)
+	if err != nil {
+		LarvaUsage(cmd, err)
+	}
+
+	// Read signature.
+	sig, err := ioutil.ReadFile(sigPath)
+	if err != nil {
+		LarvaUsage(nil, util.FmtChildNewtError(err,
+			"Failed to read signature: %s", err.Error()))
+	}
+
+	if len(mman.Signature) != 0 && len(mman.Signature) != len(sig) {
+		util.StatusMessage(util.VERBOSITY_QUIET,
+			"Warning: old and new signature lengths differ (%d != %d)",
+			len(mman.Signature), len(sig))
+	}
+	if len(sig) > MAX_SIG_LEN {
+		LarvaUsage(nil, util.FmtNewtError(
+			"signature larger than arbitrary maximum (%d > %d)",
+			len(sig), MAX_SIG_LEN))
+	}
+
+	// Update manifest.
+	mman.Signature = hex.EncodeToString(sig)
+
+	// Write new artifacts.
+	if outDir != mfgDir {
+		// Not an in-place operation; copy input directory.
+		if err := CopyDir(mfgDir, outDir); err != nil {
+			LarvaUsage(nil, err)
+		}
+	}
+
+	json, err := mman.MarshalJson()
+	if err != nil {
+		LarvaUsage(nil, err)
+	}
+
+	manPath := fmt.Sprintf("%s/%s", outDir, mfg.MANIFEST_FILENAME)
+	if err := WriteFile(json, manPath); err != nil {
+		LarvaUsage(nil, err)
+	}
+}
+
 func AddMfgCommands(cmd *cobra.Command) {
 	mfgCmd := &cobra.Command{
 		Use:   "mfg",
@@ -441,4 +503,16 @@ func AddMfgCommands(cmd *cobra.Command) {
 		"Replace input files")
 
 	mfgCmd.AddCommand(rehashCmd)
+
+	signCmd := &cobra.Command{
+		Use:   "sign <mfgimage-dir> <signature-file>",
+		Short: "Replaces an mfgimage's signature",
+		Run:   runSignMfgCmd,
+	}
+	signCmd.PersistentFlags().StringVarP(&OptOutFilename, "outdir", "o",
+		"", "Directory to write to")
+	signCmd.PersistentFlags().BoolVarP(&OptInPlace, "inplace", "i", false,
+		"Replace input files")
+
+	mfgCmd.AddCommand(signCmd)
 }
