@@ -44,7 +44,7 @@ func loadDecodedMfg(basePath string) (DecodedMfg, error) {
 }
 
 func LoadMfgEmitter(basePkg *pkg.LocalPackage,
-	ver image.ImageVersion) (MfgEmitter, error) {
+	ver image.ImageVersion, keys []image.ImageSigKey) (MfgEmitter, error) {
 
 	dm, err := loadDecodedMfg(basePkg.BasePath())
 	if err != nil {
@@ -61,7 +61,7 @@ func LoadMfgEmitter(basePkg *pkg.LocalPackage,
 		return MfgEmitter{}, err
 	}
 
-	me, err := NewMfgEmitter(mb, basePkg.Name(), ver, device)
+	me, err := NewMfgEmitter(mb, basePkg.Name(), ver, device, keys)
 	if err != nil {
 		return MfgEmitter{}, err
 	}

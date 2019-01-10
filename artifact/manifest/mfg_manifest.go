@@ -31,6 +31,11 @@ type MfgManifestMeta struct {
 	// XXX: refhash
 }
 
+type MfgManifestSig struct {
+	Key string `json:"key"`
+	Sig string `json:"sig"`
+}
+
 type MfgManifest struct {
 	Name       string            `json:"name"`
 	BuildTime  string            `json:"build_time"`
@@ -40,7 +45,7 @@ type MfgManifest struct {
 	Device     int               `json:"device"`
 	BinPath    string            `json:"bin_path"`
 	Bsp        string            `json:"bsp"`
-	Signature  string            `json:"signature"`
+	Signatures []MfgManifestSig  `json:"signatures"`
 	FlashAreas []flash.FlashArea `json:"flash_map"`
 
 	Targets []MfgManifestTarget `json:"targets"`
