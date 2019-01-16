@@ -244,7 +244,7 @@ func (me *MfgEmitter) createSigs() ([]manifest.MfgManifestSig, error) {
 		return nil, err
 	}
 
-	var sigs []manifest.MfgManifestSig
+	var mansigs []manifest.MfgManifestSig
 	for _, k := range me.Keys {
 		sig, err := image.GenerateSig(k, hashBytes)
 		if err != nil {
@@ -257,13 +257,21 @@ func (me *MfgEmitter) createSigs() ([]manifest.MfgManifestSig, error) {
 		}
 		keyHash := sec.RawKeyHash(pubKey)
 
-		sigs = append(sigs, manifest.MfgManifestSig{
+		mansig := manifest.MfgManifestSig{
 			Key: hex.EncodeToString(keyHash),
 			Sig: hex.EncodeToString(sig),
-		})
+		}
+		if me.Mfg.Meta != nil {
+			hashOffInMeta := me.Mfg.Meta.HashOffset()
+			if hashOffInMeta != -1 {
+				mansig.HashOff = me.Mfg.MetaOff + hashOffInMeta
+				mansig.HashLen = mfg.META_HASH_SZ
+			}
+		}
+		mansigs = append(mansigs, mansig)
 	}
 
-	return sigs, nil
+	return mansigs, nil
 }
 
 // emitManifest generates an mfg manifest.
