@@ -463,6 +463,7 @@ func (r *Resolver) loadDepsForPkg(rpkg *ResolvePackage) (bool, error) {
 	for _, entry := range depEntries {
 		depStr, ok := entry.Value.(string)
 		if ok && depStr != "" {
+			//fmt.Printf("%s: ADDING DEPENDENCY %s (%s)\n", rpkg.Lpkg.Name(), depStr, entry.Expr)
 			newDep, err := pkg.NewDependency(rpkg.Lpkg.Repo(), depStr)
 			if err != nil {
 				return false, err
@@ -546,16 +547,147 @@ func (r *Resolver) reloadCfg() (bool, error) {
 
 	cfg.ResolveValueRefs()
 
+	//oe := r.cfg.Settings["BOOT_LOADER"]
+	//ne := cfg.Settings["BOOT_LOADER"]
+
 	// Determine if any settings have changed.
 	for k, v := range cfg.Settings {
 		oldval, ok := r.cfg.Settings[k]
+		if k == "BOOT_LOADER" {
+			//fmt.Printf("CHECK: BOOT_LOADER: ok=%v\n", ok)
+		}
 		if !ok || len(oldval.History) != len(v.History) {
+			//fmt.Printf("DETECTED CHANGE: %s: %v->%v ::: BOOT_LOADER %v -> %v\n", k, oldval.Value, v.Value, oe.Value, ne.Value)
+			r.cfg = cfg
+			return true, nil
+		}
+	}
+
+	for k, _ := range r.cfg.Settings {
+		if _, ok := cfg.Settings[k]; !ok {
+			//fmt.Printf("DETECTED CHANGE: %s\n", k)
 			r.cfg = cfg
 			return true, nil
 		}
 	}
 
 	return false, nil
+}
+
+func (rpkg *ResolvePackage) trace(settings map[string]string) (bool, error) {
+	seen := map[*ResolvePackage]struct{}{}
+
+	var iter func(cur *ResolvePackage) (bool, error)
+	iter = func(cur *ResolvePackage) (bool, error) {
+		if _, ok := seen[cur]; ok {
+			return false, nil
+		}
+		seen[cur] = struct{}{}
+
+		if cur.Lpkg.Type() > pkg.PACKAGE_TYPE_LIB {
+			return true, nil
+		}
+
+		for depender, _ := range cur.revDeps {
+			rdep := depender.Deps[cur]
+			es := rdep.ExprString()
+			depGood := true
+			if es != "" {
+				r, err := parse.ParseAndEval(es, settings)
+				if err != nil {
+					return false, err
+				}
+				depGood = r
+			}
+
+			//fmt.Printf("%s --> %s (%v)\n", cur.Lpkg.Name(), depender.Lpkg.Name(), depGood)
+			if depGood {
+				sub, err := iter(depender)
+				if err != nil {
+					return false, err
+				}
+				if sub {
+					return true, nil
+				}
+			}
+		}
+
+		return false, nil
+	}
+
+	return iter(rpkg)
+}
+
+// Return true if repeat required.
+func (r *Resolver) superPrune(rpkg *ResolvePackage) (bool, error) {
+	lpkgs := RpkgSliceToLpkgSlice(r.rpkgSlice())
+	apis := r.apiSlice()
+
+	for i, lpkg := range lpkgs {
+		if lpkg == rpkg.Lpkg {
+			lpkgs[i] = lpkgs[len(lpkgs)-1]
+			lpkgs = lpkgs[:len(lpkgs)-1]
+			break
+		}
+	}
+
+	settings := r.cfg.SettingValues()
+	cfg, err := syscfg.Read(lpkgs, apis, r.injectedSettings, settings,
+		r.flashMap)
+	if err != nil {
+		return false, err
+	}
+
+	found, err := rpkg.trace(cfg.SettingValues())
+	if err != nil {
+		return false, err
+	}
+
+	return !found, nil
+}
+
+func (r *Resolver) isSeed(rpkg *ResolvePackage) bool {
+	for _, s := range r.seedPkgs {
+		if s == rpkg.Lpkg {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *Resolver) superPruneAll() (bool, error) {
+	var iter func() (bool, error)
+
+	iter = func() (bool, error) {
+		for _, rpkg := range r.pkgMap {
+			if !r.isSeed(rpkg) {
+				pruned, err := r.superPrune(rpkg)
+				if err != nil {
+					return false, err
+				}
+				if pruned {
+					if err := r.deletePkg(rpkg); err != nil {
+						return false, err
+					}
+					return true, nil
+				}
+			}
+		}
+		return false, nil
+	}
+
+	pruned := false
+	for {
+		rpt, err := iter()
+		if err != nil {
+			return false, err
+		}
+		if !rpt {
+			return pruned, nil
+		}
+
+		pruned = true
+	}
 }
 
 // @return bool                 True if any packages were pruned, false
@@ -628,6 +760,13 @@ func (r *Resolver) resolveHardDepsOnce() (bool, error) {
 	anyPruned, err := r.pruneOrphans()
 	if err != nil {
 		return false, err
+	}
+
+	if !anyPruned {
+		anyPruned, err = r.superPruneAll()
+		if err != nil {
+			return false, err
+		}
 	}
 
 	return anyPruned, nil
