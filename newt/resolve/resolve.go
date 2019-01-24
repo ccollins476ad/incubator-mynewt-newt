@@ -575,54 +575,97 @@ func (r *Resolver) reloadCfg() (bool, error) {
 	return false, nil
 }
 
-func (rpkg *ResolvePackage) trace(settings map[string]string) (bool, error) {
+func (r *Resolver) isSeed(rpkg *ResolvePackage) bool {
+	for _, s := range r.seedPkgs {
+		if s == rpkg.Lpkg {
+			return true
+		}
+	}
+	return false
+}
+
+// traceToSeed determines if the specified package can be reached from a seed
+// package during a traversal of the dependency graph.  The supplied settings
+// are used to determine the validity of dependencies in the graph.
+func (rpkg *ResolvePackage) traceToSeed(
+	settings map[string]string) (bool, error) {
+
 	seen := map[*ResolvePackage]struct{}{}
 
 	var iter func(cur *ResolvePackage) (bool, error)
 	iter = func(cur *ResolvePackage) (bool, error) {
+		// Don't process the same package twice.
 		if _, ok := seen[cur]; ok {
 			return false, nil
 		}
 		seen[cur] = struct{}{}
 
+		// A type greater than "library" is a seed package.
 		if cur.Lpkg.Type() > pkg.PACKAGE_TYPE_LIB {
 			return true, nil
 		}
 
+		// Repeat the trace recursively for each depending package.
 		for depender, _ := range cur.revDeps {
 			rdep := depender.Deps[cur]
+
+			// Only process this reverse dependency if it is valid given the
+			// specific syscfg.
+			depValid := true
 			es := rdep.ExprString()
-			depGood := true
 			if es != "" {
-				r, err := parse.ParseAndEval(es, settings)
+				exprTrue, err := parse.ParseAndEval(es, settings)
 				if err != nil {
 					return false, err
 				}
-				depGood = r
+				depValid = exprTrue
 			}
 
-			if depGood {
-				sub, err := iter(depender)
+			if depValid {
+				traced, err := iter(depender)
 				if err != nil {
 					return false, err
 				}
-				if sub {
+				if traced {
+					// Depender can be traced to a seed package.
 					return true, nil
 				}
 			}
 		}
 
+		// All dependencies processed without reaching a seed package.
 		return false, nil
 	}
 
 	return iter(rpkg)
 }
 
-// Return true if repeat required.
-func (r *Resolver) superPrune(rpkg *ResolvePackage) (bool, error) {
+// detectImposter returns true if the package is an imposter.  A package is an
+// imposter if it is in the dependency graph by virtue of its own syscfg
+// defines and overrides.  For example, say we have a package `foo`:
+//
+//     pkg.name: foo
+//     syscfg.defs:
+//         FOO_SETTING: 1
+//
+// Then we have a BSP package:
+//
+//     pkg.name: my_bsp
+//     pkg.deps.FOO_SETTING:
+//         - foo
+//
+// If this is the only dependency on `foo`, then `foo` is an imposter.  It
+// should be removed from the graph, and its syscfg defines and overrides
+// should be deleted.
+//
+// Because the syscfg state changes as newt discovers new dependencies, it is
+// possible for imposters to end up in the graph.
+func (r *Resolver) detectImposter(rpkg *ResolvePackage) (bool, error) {
 	lpkgs := RpkgSliceToLpkgSlice(r.rpkgSlice())
 	apis := r.apiSlice()
 
+	// Calculate a new syscfg instance, pretending the specified package
+	// doesn't exist.
 	for i, lpkg := range lpkgs {
 		if lpkg == rpkg.Lpkg {
 			lpkgs[i] = lpkgs[len(lpkgs)-1]
@@ -638,7 +681,9 @@ func (r *Resolver) superPrune(rpkg *ResolvePackage) (bool, error) {
 		return false, err
 	}
 
-	found, err := rpkg.trace(cfg.SettingValues())
+	// See if the package can still be traced to a seed package when the
+	// modified syscfg is used.
+	found, err := rpkg.traceToSeed(cfg.SettingValues())
 	if err != nil {
 		return false, err
 	}
@@ -646,83 +691,99 @@ func (r *Resolver) superPrune(rpkg *ResolvePackage) (bool, error) {
 	return !found, nil
 }
 
-func (r *Resolver) isSeed(rpkg *ResolvePackage) bool {
-	for _, s := range r.seedPkgs {
-		if s == rpkg.Lpkg {
-			return true
-		}
-	}
-	return false
-}
-
-func (r *Resolver) superPruneWorker(
-	jobsCh chan *ResolvePackage,
+// detectImpostersWorker reads packages from a channel and determines if they are imposters.  It is meant to be run in parallel via multiple go routines.
+func (r *Resolver) detectImpostersWorker(
+	jobsCh <-chan *ResolvePackage,
 	stopCh chan struct{},
-	pruneCh chan *ResolvePackage,
-	errCh chan error,
+	resultsCh chan<- *ResolvePackage,
+	errCh chan<- error,
 ) {
+
+	// Repeatedly process jobs until any of:
+	// 1. Stop signal from another go routine.
+	// 2. Error encountered.
+	// 3. No more jobs.
 	for {
 		select {
 		case <-stopCh:
+			// Re-enqueue the stop signal for the other go routines.
 			stopCh <- struct{}{}
+
+			// Completed without error.
 			errCh <- nil
 			return
 
 		case rpkg := <-jobsCh:
+			// Seed packages are trivially traceable; don't process them.
 			if !r.isSeed(rpkg) {
-				pruned, err := r.superPrune(rpkg)
+				pruned, err := r.detectImposter(rpkg)
 				if err != nil {
 					stopCh <- struct{}{}
 					errCh <- err
 					return
 				}
+
 				if pruned {
-					pruneCh <- rpkg
+					// Signal that this package can be pruned.
+					resultsCh <- rpkg
 				}
 			}
 
 		default:
+			// No more jobs to process.
 			errCh <- nil
 			return
 		}
 	}
 }
 
-func (r *Resolver) superPruneAll() (bool, error) {
+// pruneImposters identifies and deletes imposters contained by the resolver.
+// This function should be called repeatedly until no more imposters are
+// identified.
+func (r *Resolver) pruneImposters() (bool, error) {
 	jobsCh := make(chan *ResolvePackage, len(r.pkgMap))
 	defer close(jobsCh)
 
 	stopCh := make(chan struct{}, newtutil.NewtNumJobs)
 	defer close(stopCh)
 
-	pruneCh := make(chan *ResolvePackage, len(r.pkgMap))
-	defer close(pruneCh)
+	resultsCh := make(chan *ResolvePackage, len(r.pkgMap))
+	defer close(resultsCh)
 
 	errCh := make(chan error, newtutil.NewtNumJobs)
 	defer close(errCh)
 
+	// Enqueue all packages to the jobs channel.
 	for _, rpkg := range r.pkgMap {
 		jobsCh <- rpkg
 	}
 
+	// Iterate through all packages with a collection of go routines.
 	for i := 0; i < newtutil.NewtNumJobs; i++ {
-		go r.superPruneWorker(jobsCh, stopCh, pruneCh, errCh)
+		go r.detectImpostersWorker(jobsCh, stopCh, resultsCh, errCh)
 	}
 
+	// Collect errors from each routine.  Abort on first error.
 	for i := 0; i < newtutil.NewtNumJobs; i++ {
 		if err := <-errCh; err != nil {
 			return false, err
 		}
 	}
 
+	// Delete all imposter packages.
 	anyPruned := false
 	for {
 		select {
-		case rpkg := <-pruneCh:
-			if err := r.deletePkg(rpkg); err != nil {
-				return false, err
+		case rpkg := <-resultsCh:
+			// This package may have already been deleted indirectly via a
+			// prior delete.  If it has no more reverse dependencies, it is
+			// already invalid.
+			if len(rpkg.revDeps) > 0 {
+				if err := r.deletePkg(rpkg); err != nil {
+					return false, err
+				}
+				anyPruned = true
 			}
-			anyPruned = true
 
 		default:
 			return anyPruned, nil
@@ -803,7 +864,7 @@ func (r *Resolver) resolveHardDepsOnce() (bool, error) {
 	}
 
 	if !anyPruned {
-		anyPruned, err = r.superPruneAll()
+		anyPruned, err = r.pruneImposters()
 		if err != nil {
 			return false, err
 		}
@@ -1043,7 +1104,7 @@ func ResolveFull(
 	}
 
 	// Otherwise, we need to resolve dependencies separately for:
-	// 1. The set of loader pacakges, and
+	// 1. The set of loader packages, and
 	// 2. The set of app packages.
 	//
 	// These need to be resolved separately so that it is possible later to
