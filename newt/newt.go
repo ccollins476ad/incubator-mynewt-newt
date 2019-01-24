@@ -23,6 +23,8 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"runtime/pprof"
+	"time"
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -31,6 +33,25 @@ import (
 	"mynewt.apache.org/newt/newt/newtutil"
 	"mynewt.apache.org/newt/util"
 )
+
+func startCpuProfile(dir string) *os.File {
+	now := int32(time.Now().Unix())
+	filename := fmt.Sprintf("cpu-%d.prof", now)
+	path := fmt.Sprintf("%s/%s", dir, filename)
+
+	f, err := os.Create(path)
+	if err != nil {
+		panic(err.Error())
+	}
+	pprof.StartCPUProfile(f)
+
+	return f
+}
+
+func stopCpuProfile(f *os.File) {
+	pprof.StopCPUProfile()
+	f.Close()
+}
 
 var NewtLogLevel log.Level
 var newtSilent bool
@@ -169,6 +190,9 @@ func main() {
 		cmd.SilenceErrors = false
 		cmd.SilenceUsage = false
 	}
+
+	f := startCpuProfile("/Users/ccollins/tmp")
+	defer stopCpuProfile(f)
 
 	cmd.Execute()
 }
