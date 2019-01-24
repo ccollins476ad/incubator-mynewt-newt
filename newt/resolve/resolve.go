@@ -28,6 +28,7 @@ import (
 
 	"mynewt.apache.org/newt/newt/flashmap"
 	"mynewt.apache.org/newt/newt/logcfg"
+	"mynewt.apache.org/newt/newt/newtutil"
 	"mynewt.apache.org/newt/newt/parse"
 	"mynewt.apache.org/newt/newt/pkg"
 	"mynewt.apache.org/newt/newt/project"
@@ -600,7 +601,6 @@ func (rpkg *ResolvePackage) trace(settings map[string]string) (bool, error) {
 				depGood = r
 			}
 
-			//fmt.Printf("%s --> %s (%v)\n", cur.Lpkg.Name(), depender.Lpkg.Name(), depGood)
 			if depGood {
 				sub, err := iter(depender)
 				if err != nil {
@@ -655,38 +655,78 @@ func (r *Resolver) isSeed(rpkg *ResolvePackage) bool {
 	return false
 }
 
-func (r *Resolver) superPruneAll() (bool, error) {
-	var iter func() (bool, error)
+func (r *Resolver) superPruneWorker(
+	jobsCh chan *ResolvePackage,
+	stopCh chan struct{},
+	pruneCh chan *ResolvePackage,
+	errCh chan error,
+) {
+	for {
+		select {
+		case <-stopCh:
+			stopCh <- struct{}{}
+			errCh <- nil
+			return
 
-	iter = func() (bool, error) {
-		for _, rpkg := range r.pkgMap {
+		case rpkg := <-jobsCh:
 			if !r.isSeed(rpkg) {
 				pruned, err := r.superPrune(rpkg)
 				if err != nil {
-					return false, err
+					stopCh <- struct{}{}
+					errCh <- err
+					return
 				}
 				if pruned {
-					if err := r.deletePkg(rpkg); err != nil {
-						return false, err
-					}
-					return true, nil
+					pruneCh <- rpkg
 				}
 			}
+
+		default:
+			errCh <- nil
+			return
 		}
-		return false, nil
+	}
+}
+
+func (r *Resolver) superPruneAll() (bool, error) {
+	jobsCh := make(chan *ResolvePackage, len(r.pkgMap))
+	defer close(jobsCh)
+
+	stopCh := make(chan struct{}, newtutil.NewtNumJobs)
+	defer close(stopCh)
+
+	pruneCh := make(chan *ResolvePackage, len(r.pkgMap))
+	defer close(pruneCh)
+
+	errCh := make(chan error, newtutil.NewtNumJobs)
+	defer close(errCh)
+
+	for _, rpkg := range r.pkgMap {
+		jobsCh <- rpkg
 	}
 
-	pruned := false
-	for {
-		rpt, err := iter()
-		if err != nil {
+	for i := 0; i < newtutil.NewtNumJobs; i++ {
+		go r.superPruneWorker(jobsCh, stopCh, pruneCh, errCh)
+	}
+
+	for i := 0; i < newtutil.NewtNumJobs; i++ {
+		if err := <-errCh; err != nil {
 			return false, err
 		}
-		if !rpt {
-			return pruned, nil
-		}
+	}
 
-		pruned = true
+	anyPruned := false
+	for {
+		select {
+		case rpkg := <-pruneCh:
+			if err := r.deletePkg(rpkg); err != nil {
+				return false, err
+			}
+			anyPruned = true
+
+		default:
+			return anyPruned, nil
+		}
 	}
 }
 
