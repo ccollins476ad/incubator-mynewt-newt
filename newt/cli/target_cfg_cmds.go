@@ -852,5 +852,16 @@ func targetCfgCmdAll() []*cobra.Command {
 		return append(targetList(), unittestList()...)
 	})
 
+	//	jsonCmd := &cobra.Command{
+	//		Use:   "json <target> [target...]",
+	//		Short: "View a summary of target XXX",
+	//		Run:   targetJsonCmd,
+	//	}
+	//
+	//	jsonCmd.AddCommand(jsonCmd)
+	//	AddTabCompleteFn(jsonCmd, func() []string {
+	//		return append(targetList(), unittestList()...)
+	//	})
+	//
 	return cmds
 }

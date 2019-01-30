@@ -136,7 +136,7 @@ func depString(dep *resolve.ResolveDep) string {
 			s += ")"
 		}
 	} else {
-		dis := parse.Disjunction(dep.ExprMap.Exprs()).String()
+		dis := parse.Disjunction(dep.ExprSet.Exprs()).String()
 		if dis != "" {
 			s += "(syscfg:" + dis + ")"
 		}
