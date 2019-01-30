@@ -54,7 +54,7 @@ type resolveReqApi struct {
 
 	// The set of expressions which enabled this API requirement.  If any
 	// expressions are true, the API requirement is enabled.
-	exprs ExprSet
+	exprs parse.ExprSet
 }
 
 type Resolver struct {
@@ -77,18 +77,18 @@ type ResolveDep struct {
 	Rpkg *ResolvePackage
 
 	// Set of syscfg expressions that generated this dependency.
-	ExprSet ExprSet
+	ExprSet parse.ExprSet
 
 	// Represents the set of API requirements that this dependency satisfies.
 	// The map key is the API name.
-	ApiExprMap ExprMap
+	ApiExprMap parse.ExprMap
 }
 
 type ResolvePackage struct {
 	Lpkg *pkg.LocalPackage
 	Deps map[*ResolvePackage]*ResolveDep
 
-	Apis ExprMap
+	Apis parse.ExprMap
 
 	// Keeps track of API requirements and whether they are satisfied.
 	reqApiMap map[string]resolveReqApi
@@ -218,10 +218,10 @@ func (rpkg *ResolvePackage) AddDep(
 	// New dependency.
 	rpkg.Deps[depPkg] = &ResolveDep{
 		Rpkg: depPkg,
-		ExprSet: ExprSet{
+		ExprSet: parse.ExprSet{
 			exprString: expr,
 		},
-		ApiExprMap: ExprMap{},
+		ApiExprMap: parse.ExprMap{},
 	}
 
 	depPkg.revDeps[rpkg] = struct{}{}
@@ -239,7 +239,7 @@ func (rpkg *ResolvePackage) AddApiDep(
 	} else {
 		dep = &ResolveDep{
 			Rpkg:       depPkg,
-			ApiExprMap: ExprMap{},
+			ApiExprMap: parse.ExprMap{},
 		}
 		rpkg.Deps[depPkg] = dep
 	}
@@ -303,6 +303,7 @@ func (r *Resolver) fillApisFor(rpkg *ResolvePackage) error {
 		return err
 	}
 
+	//	fmt.Printf("%s: EM=%#v\n", rpkg.Lpkg.Name(), em)
 	rpkg.Apis = em
 	return nil
 }
@@ -316,10 +317,10 @@ func (r *Resolver) selectApiSuppliers() {
 	// Fill each package's list of supplied APIs.
 	for _, rpkg := range r.sortedRpkgs() {
 		r.fillApisFor(rpkg)
-		for apiName, exprMap := range rpkg.Apis {
+		for apiName, exprSet := range rpkg.Apis {
 			apiMap[apiName] = append(apiMap[apiName], resolveApi{
 				rpkg: rpkg,
-				expr: parse.Disjunction(exprMap.Exprs()),
+				expr: exprSet.Disjunction(),
 			})
 		}
 	}
@@ -575,7 +576,7 @@ func (rpkg *ResolvePackage) traceToSeed(
 
 			// Only process this reverse dependency if it is valid given the
 			// specified syscfg.
-			expr := parse.Conjunction(rdep.ExprSet.Exprs())
+			expr := rdep.ExprSet.Disjunction()
 			depValid, err := parse.Eval(expr, settings)
 			if err != nil {
 				return false, err

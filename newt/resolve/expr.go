@@ -7,29 +7,6 @@ import (
 	"mynewt.apache.org/newt/util"
 )
 
-type ExprSet map[string]*parse.Node
-type ExprMap map[string]ExprSet
-
-func (m ExprMap) Add(api string, exprs []*parse.Node) {
-	for _, e := range exprs {
-		es := m[api]
-		if es == nil {
-			es = ExprSet{}
-			m[api] = es
-		}
-		es[e.String()] = e
-	}
-}
-
-func (em ExprSet) Exprs() []*parse.Node {
-	nodes := make([]*parse.Node, 0, len(em))
-	for _, expr := range em {
-		nodes = append(nodes, expr)
-	}
-	parse.SortNodes(nodes)
-	return nodes
-}
-
 func getExprMapStringSlice(
 	yc ycfg.YCfg, key string, settings map[string]string) (
 	map[*parse.Node][]string, error) {
@@ -69,18 +46,18 @@ func revExprMapStringSlice(
 }
 
 func readExprMap(yc ycfg.YCfg, key string, settings map[string]string) (
-	ExprMap, error) {
+	parse.ExprMap, error) {
 
 	ems, err := getExprMapStringSlice(yc, key, settings)
 	if err != nil {
 		return nil, err
 	}
 
-	em := ExprMap{}
+	em := parse.ExprMap{}
 
 	rev := revExprMapStringSlice(ems)
 	for v, exprs := range rev {
-		sub := ExprSet{}
+		sub := parse.ExprSet{}
 		em[v] = sub
 		for _, expr := range exprs {
 			sub[expr.String()] = expr

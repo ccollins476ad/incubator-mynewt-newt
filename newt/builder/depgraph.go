@@ -111,32 +111,46 @@ func revdepGraph(rs *resolve.ResolveSet) (DepGraph, error) {
 	return graphMapToDepGraph(revGm), nil
 }
 
-func depString(dep *resolve.ResolveDep) string {
-	s := fmt.Sprintf("%s", dep.Rpkg.Lpkg.FullName())
+type depEntry struct {
+	pkgName     string
+	depExprs    parse.ExprSet
+	reqApiExprs parse.ExprMap
+	apiExprs    parse.ExprMap
+}
+
+func depString(entry depEntry) string {
+	s := fmt.Sprintf("%s", entry.pkgName)
 
 	type ApiPair struct {
 		api   string
 		exprs []*parse.Node
 	}
 
-	if len(dep.ApiExprMap) > 0 {
+	if len(entry.reqApiExprs) > 0 {
 		var apis []string
-		for api, _ := range dep.ApiExprMap {
+		for api, _ := range entry.reqApiExprs {
 			apis = append(apis, api)
 		}
 		sort.Strings(apis)
 
 		for _, api := range apis {
-			em := dep.ApiExprMap[api]
+			reqes := entry.reqApiExprs[api]
+			reqdis := reqes.Disjunction().String()
+
+			apies := entry.apiExprs[api]
+			apidis := apies.Disjunction().String()
+
 			s += "(api:" + api
-			dis := parse.Disjunction(em.Exprs()).String()
-			if dis != "" {
-				s += ",syscfg:" + dis
+			if reqdis != "" || apidis != "" {
+				s += ",syscfg:" + reqdis
+				if apidis != "" {
+					s += ";" + apidis
+				}
 			}
 			s += ")"
 		}
 	} else {
-		dis := parse.Disjunction(dep.ExprSet.Exprs()).String()
+		dis := entry.depExprs.Disjunction().String()
 		if dis != "" {
 			s += "(syscfg:" + dis + ")"
 		}
@@ -162,7 +176,13 @@ func DepGraphText(graph DepGraph) string {
 			if i != 0 {
 				fmt.Fprintf(buffer, " ")
 			}
-			fmt.Fprintf(buffer, "%s", depString(child))
+			entry := depEntry{
+				pkgName:     child.Rpkg.Lpkg.FullName(),
+				depExprs:    child.ExprSet,
+				reqApiExprs: child.ApiExprMap,
+				apiExprs:    parent.Apis,
+			}
+			fmt.Fprintf(buffer, "%s", depString(entry))
 		}
 		fmt.Fprintf(buffer, "]")
 	}
@@ -187,7 +207,13 @@ func RevdepGraphText(graph DepGraph) string {
 			if i != 0 {
 				fmt.Fprintf(buffer, " ")
 			}
-			fmt.Fprintf(buffer, "%s", depString(child))
+			entry := depEntry{
+				pkgName:     child.Rpkg.Lpkg.FullName(),
+				depExprs:    child.ExprSet,
+				reqApiExprs: child.ApiExprMap,
+				apiExprs:    parent.Apis,
+			}
+			fmt.Fprintf(buffer, "%s", depString(entry))
 		}
 		fmt.Fprintf(buffer, "]")
 	}
