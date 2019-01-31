@@ -37,6 +37,7 @@ import (
 	"mynewt.apache.org/newt/newt/newtutil"
 	"mynewt.apache.org/newt/newt/pkg"
 	"mynewt.apache.org/newt/newt/resolve"
+	"mynewt.apache.org/newt/newt/serial"
 	"mynewt.apache.org/newt/newt/stage"
 	"mynewt.apache.org/newt/newt/syscfg"
 	"mynewt.apache.org/newt/newt/sysdown"
@@ -685,6 +686,32 @@ func targetConfigInitCmd(cmd *cobra.Command, args []string) {
 	}
 }
 
+func targetJsonCmd(cmd *cobra.Command, args []string) {
+	if len(args) < 1 {
+		NewtUsage(cmd,
+			util.NewNewtError("Must specify target or unittest name"))
+	}
+
+	TryGetProject()
+
+	for _, arg := range args {
+		b, err := TargetBuilderForTargetOrUnittest(arg)
+		if err != nil {
+			NewtUsage(cmd, err)
+		}
+
+		rpt, err := serial.NewReport(b)
+		if err != nil {
+			NewtUsage(nil, err)
+		}
+		s, err := rpt.JSON()
+		if err != nil {
+			NewtUsage(nil, err)
+		}
+		util.StatusMessage(util.VERBOSITY_DEFAULT, s+"\n")
+	}
+}
+
 func targetCfgCmdAll() []*cobra.Command {
 	cmds := []*cobra.Command{}
 
@@ -852,16 +879,16 @@ func targetCfgCmdAll() []*cobra.Command {
 		return append(targetList(), unittestList()...)
 	})
 
-	//	jsonCmd := &cobra.Command{
-	//		Use:   "json <target> [target...]",
-	//		Short: "View a summary of target XXX",
-	//		Run:   targetJsonCmd,
-	//	}
-	//
-	//	jsonCmd.AddCommand(jsonCmd)
-	//	AddTabCompleteFn(jsonCmd, func() []string {
-	//		return append(targetList(), unittestList()...)
-	//	})
-	//
+	jsonCmd := &cobra.Command{
+		Use:   "json <target> [target...]",
+		Short: "View a summary of target XXX",
+		Run:   targetJsonCmd,
+	}
+
+	cmds = append(cmds, jsonCmd)
+	AddTabCompleteFn(jsonCmd, func() []string {
+		return append(targetList(), unittestList()...)
+	})
+
 	return cmds
 }

@@ -4,6 +4,10 @@ type ExprSet map[string]*Node
 type ExprMap map[string]ExprSet
 
 func (es ExprSet) Exprs() []*Node {
+	if len(es) == 0 {
+		return nil
+	}
+
 	nodes := make([]*Node, 0, len(es))
 	for _, expr := range es {
 		nodes = append(nodes, expr)

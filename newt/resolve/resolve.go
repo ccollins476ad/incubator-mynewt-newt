@@ -77,7 +77,7 @@ type ResolveDep struct {
 	Rpkg *ResolvePackage
 
 	// Set of syscfg expressions that generated this dependency.
-	ExprSet parse.ExprSet
+	Exprs parse.ExprSet
 
 	// Represents the set of API requirements that this dependency satisfies.
 	// The map key is the API name.
@@ -201,49 +201,49 @@ func (rpkg *ResolvePackage) AddDep(
 
 	exprString := expr.String()
 
-	if dep := rpkg.Deps[depPkg]; dep != nil {
+	var changed bool
+	var dep *ResolveDep
+	if dep = rpkg.Deps[depPkg]; dep != nil {
 		// This package already depends on dep.  If the conditional expression
 		// is new, then the existing dependency needs to be updated with the
 		// new information.  Otherwise, ignore the duplicate.
 
-		changed := false
-		if _, ok := dep.ExprSet[exprString]; !ok {
-			dep.ExprSet[exprString] = expr
+		if _, ok := dep.Exprs[exprString]; !ok {
 			changed = true
 		}
+	} else {
+		// New dependency.
+		dep = &ResolveDep{
+			Rpkg: depPkg,
+		}
 
-		return changed
+		rpkg.Deps[depPkg] = dep
+		depPkg.revDeps[rpkg] = struct{}{}
+		changed = true
 	}
 
-	// New dependency.
-	rpkg.Deps[depPkg] = &ResolveDep{
-		Rpkg: depPkg,
-		ExprSet: parse.ExprSet{
-			exprString: expr,
-		},
-		ApiExprMap: parse.ExprMap{},
+	if dep.Exprs == nil {
+		dep.Exprs = parse.ExprSet{}
 	}
+	dep.Exprs[exprString] = expr
 
-	depPkg.revDeps[rpkg] = struct{}{}
-	return true
+	return changed
 }
 
 func (rpkg *ResolvePackage) AddApiDep(
 	depPkg *ResolvePackage, api string, exprs []*parse.Node) {
 
 	dep := rpkg.Deps[depPkg]
-	if dep != nil {
-		if len(dep.ExprSet) != 0 {
-			return
-		}
-	} else {
+	if dep == nil {
 		dep = &ResolveDep{
-			Rpkg:       depPkg,
-			ApiExprMap: parse.ExprMap{},
+			Rpkg: depPkg,
 		}
 		rpkg.Deps[depPkg] = dep
 	}
 
+	if dep.ApiExprMap == nil {
+		dep.ApiExprMap = parse.ExprMap{}
+	}
 	dep.ApiExprMap.Add(api, exprs)
 }
 
@@ -303,7 +303,6 @@ func (r *Resolver) fillApisFor(rpkg *ResolvePackage) error {
 		return err
 	}
 
-	//	fmt.Printf("%s: EM=%#v\n", rpkg.Lpkg.Name(), em)
 	rpkg.Apis = em
 	return nil
 }
@@ -576,7 +575,7 @@ func (rpkg *ResolvePackage) traceToSeed(
 
 			// Only process this reverse dependency if it is valid given the
 			// specified syscfg.
-			expr := rdep.ExprSet.Disjunction()
+			expr := rdep.Exprs.Disjunction()
 			depValid, err := parse.Eval(expr, settings)
 			if err != nil {
 				return false, err
@@ -1040,8 +1039,7 @@ func ResolveFull(
 
 	// Determine which package satisfies each API and which APIs are
 	// unsatisfied.
-	apiMap := map[string]*ResolvePackage{}
-	apiMap, res.UnsatisfiedApis = r.apiResolution()
+	res.ApiMap, res.UnsatisfiedApis = r.apiResolution()
 
 	for api, m := range r.apiConflicts {
 		c := ApiConflict{
@@ -1089,7 +1087,7 @@ func ResolveFull(
 
 	// It is OK if the app requires an API that is supplied by the loader.
 	// Ensure each set of packages has access to the API-providers.
-	for _, rpkg := range apiMap {
+	for _, rpkg := range res.ApiMap {
 		loaderSeeds = append(loaderSeeds, rpkg.Lpkg)
 		appSeeds = append(appSeeds, rpkg.Lpkg)
 	}

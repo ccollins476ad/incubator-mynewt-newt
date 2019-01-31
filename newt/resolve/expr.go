@@ -58,10 +58,10 @@ func readExprMap(yc ycfg.YCfg, key string, settings map[string]string) (
 	rev := revExprMapStringSlice(ems)
 	for v, exprs := range rev {
 		sub := parse.ExprSet{}
-		em[v] = sub
 		for _, expr := range exprs {
 			sub[expr.String()] = expr
 		}
+		em[v] = sub
 	}
 
 	return em, nil
