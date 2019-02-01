@@ -60,7 +60,8 @@ before_script:
   - gcc --version
 
 script:
-  - $HOME/ci/test_newt.sh
+  - $HOME/ci/test_newt_cmds.sh
+  - $HOME/ci/test_newt_inter.sh
 
 cache:
   directories:
