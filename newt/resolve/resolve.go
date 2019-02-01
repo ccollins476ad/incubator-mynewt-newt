@@ -1009,6 +1009,10 @@ func (r *Resolver) apiResolution() (
 		}
 	}
 
+	for _, slice := range unsatisfied {
+		SortResolvePkgs(slice)
+	}
+
 	return apiMap, unsatisfied
 }
 
