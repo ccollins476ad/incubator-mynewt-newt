@@ -686,7 +686,7 @@ func targetConfigInitCmd(cmd *cobra.Command, args []string) {
 	}
 }
 
-func targetJsonCmd(cmd *cobra.Command, args []string) {
+func targetDumpCmd(cmd *cobra.Command, args []string) {
 	if len(args) < 1 {
 		NewtUsage(cmd,
 			util.NewNewtError("Must specify target or unittest name"))
@@ -879,14 +879,14 @@ func targetCfgCmdAll() []*cobra.Command {
 		return append(targetList(), unittestList()...)
 	})
 
-	jsonCmd := &cobra.Command{
-		Use:   "json <target> [target...]",
-		Short: "View a summary of target XXX",
-		Run:   targetJsonCmd,
+	dumpCmd := &cobra.Command{
+		Use:   "dump <target> [target...]",
+		Short: "Dump a target's intermediate form in JSON",
+		Run:   targetDumpCmd,
 	}
 
-	cmds = append(cmds, jsonCmd)
-	AddTabCompleteFn(jsonCmd, func() []string {
+	cmds = append(cmds, dumpCmd)
+	AddTabCompleteFn(dumpCmd, func() []string {
 		return append(targetList(), unittestList()...)
 	})
 
