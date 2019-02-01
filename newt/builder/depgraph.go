@@ -93,6 +93,9 @@ func revdepGraph(rs *resolve.ResolveSet) (DepGraph, error) {
 
 	rgraph := DepGraph{}
 	for parent, entries := range graph {
+		if rgraph[parent] == nil {
+			rgraph[parent] = []DepEntry{}
+		}
 		for _, entry := range entries {
 			rgraph[entry.PkgName] = append(rgraph[entry.PkgName], DepEntry{
 				PkgName:     parent,
