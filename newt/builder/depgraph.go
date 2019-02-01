@@ -93,9 +93,13 @@ func revdepGraph(rs *resolve.ResolveSet) (DepGraph, error) {
 
 	rgraph := DepGraph{}
 	for parent, entries := range graph {
+		// Ensure parent not is present in graph, even if no one depends on it.
 		if rgraph[parent] == nil {
 			rgraph[parent] = []DepEntry{}
 		}
+
+		// Reverse the dependency relationship for each child and add to the
+		// graph.
 		for _, entry := range entries {
 			rgraph[entry.PkgName] = append(rgraph[entry.PkgName], DepEntry{
 				PkgName:     parent,

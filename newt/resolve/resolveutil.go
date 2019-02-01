@@ -39,17 +39,9 @@ func (s rpkgSorter) Less(i, j int) bool {
 	return s.pkgs[i].Lpkg.FullName() < s.pkgs[j].Lpkg.FullName()
 }
 
-func SortResolvePkgs(pkgs []*ResolvePackage) []*ResolvePackage {
-	sorter := rpkgSorter{
-		pkgs: make([]*ResolvePackage, 0, len(pkgs)),
-	}
-
-	for _, p := range pkgs {
-		sorter.pkgs = append(sorter.pkgs, p)
-	}
-
+func SortResolvePkgs(pkgs []*ResolvePackage) {
+	sorter := rpkgSorter{pkgs}
 	sort.Sort(sorter)
-	return sorter.pkgs
 }
 
 type rdepSorter struct {
