@@ -22,6 +22,7 @@ package builder
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -75,6 +76,10 @@ func Load(binBaseName string, bspPkg *pkg.BspPackage,
 	coreRepo := project.GetProject().FindRepo("apache-mynewt-core")
 	env = append(env, fmt.Sprintf("CORE_PATH=%s", coreRepo.Path()))
 	env = append(env, fmt.Sprintf("BSP_PATH=%s", bspPath))
+
+	if runtime.GOOS == "windows" {
+		binBaseName = util.WinToUnixPath(binBaseName)
+	}
 	env = append(env, fmt.Sprintf("BIN_BASENAME=%s", binBaseName))
 	env = append(env, fmt.Sprintf("BIN_ROOT=%s", BinRoot()))
 

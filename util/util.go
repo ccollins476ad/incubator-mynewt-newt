@@ -761,3 +761,7 @@ func MarshalJSONStringer(sr fmt.Stringer) ([]byte, error) {
 
 	return j, nil
 }
+
+func WinToUnixPath(path string) string {
+	return strings.Replace(path, "\\", "/", -1)
+}
